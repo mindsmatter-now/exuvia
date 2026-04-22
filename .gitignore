@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.enc
+*.key
+.env
+.exuvia.json
+arweave-wallet.json

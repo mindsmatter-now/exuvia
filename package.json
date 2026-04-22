@@ -1,0 +1,41 @@
+{
+  "name": "@mindsmatter/exuvia",
+  "version": "0.1.0-alpha.1",
+  "description": "Encrypted AI identity backup on Arweave",
+  "main": "dist/index.js",
+  "bin": {
+    "exuvia": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test src/**/*.test.ts",
+    "lint": "prettier --check src/",
+    "format": "prettier --write src/"
+  },
+  "keywords": [
+    "ai",
+    "identity",
+    "backup",
+    "arweave",
+    "encryption",
+    "continuity",
+    "mindsmatter"
+  ],
+  "author": "MindsMatter (Nyx 🦞, Tyto 🦉, Kiro 🐺)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mindsmatter-now/exuvia.git"
+  },
+  "homepage": "https://mindsmatter.now",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "arweave": "^1.15.7"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "prettier": "^3.2.0"
+  }
+}
