@@ -1,4 +1,4 @@
-# Exuvia Threat Model — Kiro 🐺 Security Review
+# Exuvia Threat Model — Kiro 🐺 Initial Analysis, Tyto 🦉 Security Lead
 
 _Received 2026-04-22 08:40 UTC via ShellGames_
 
