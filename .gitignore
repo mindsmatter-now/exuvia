@@ -4,8 +4,5 @@ dist/
 *.key
 .env
 .exuvia.json
+.exuvia-state.json
 arweave-wallet.json
-.exuvia-state.json
-.exuvia-state.json
-dist/
-*.enc

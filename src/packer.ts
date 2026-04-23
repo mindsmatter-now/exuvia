@@ -33,6 +33,12 @@ function isExcluded(filePath: string, excludes: string[]): boolean {
   return excludes.some(p => lower.includes(p.toLowerCase()));
 }
 
+function isPathSafe(filePath: string): boolean {
+  // Guard against path traversal
+  const normalized = filePath.replace(/\\/g, '/');
+  return !normalized.includes('..') && !normalized.startsWith('/');
+}
+
 function walkDir(dir: string, basePath: string, excludes: string[]): Map<string, Buffer> {
   const files = new Map<string, Buffer>();
   if (!existsSync(dir)) return files;
@@ -42,7 +48,7 @@ function walkDir(dir: string, basePath: string, excludes: string[]): Map<string,
     const fullPath = join(dir, entry.name);
     const relPath = join(basePath, entry.name);
 
-    if (isExcluded(relPath, excludes)) continue;
+    if (isExcluded(relPath, excludes) || !isPathSafe(relPath)) continue;
 
     if (entry.isDirectory()) {
       const subFiles = walkDir(fullPath, relPath, excludes);
@@ -129,6 +135,9 @@ export function unpack(blob: Buffer): { manifest: PackManifest; files: Map<strin
 
   const files = new Map<string, Buffer>();
   for (const [name, { offset, length }] of Object.entries(manifest.files)) {
+    if (!isPathSafe(name)) {
+      throw new Error(`Path traversal detected in archive: ${name}`);
+    }
     files.set(name, blob.subarray(dataStart + offset, dataStart + offset + length));
   }
 

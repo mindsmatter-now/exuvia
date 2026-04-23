@@ -213,7 +213,7 @@ async function backup(args: string[]) {
 
   // 7. Save encrypted file
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const outPath = `exuvia-${agent}-${timestamp}.enc`;
+  const outPath = join(workspace, `exuvia-${agent}-${timestamp}.enc`);
   writeFileSync(outPath, encrypted);
   console.log(`💾 Saved: ${outPath}`);
   console.log(`   Plaintext hash: ${hash}`);
@@ -266,7 +266,16 @@ async function restore(args: string[]) {
 
   const encrypted = readFileSync(file);
   console.log('🔐 Decrypting...');
-  const decrypted = decrypt(encrypted, passphrase);
+  let decrypted: Buffer;
+  try {
+    decrypted = decrypt(encrypted, passphrase);
+  } catch (e: any) {
+    if (e.message?.includes('Unsupported state') || e.code === 'ERR_OSSL_EVP_BAD_DECRYPT') {
+      console.error('❌ Wrong passphrase or corrupted file.');
+      process.exit(1);
+    }
+    throw e;
+  }
 
   const { manifest, files } = unpack(decrypted);
   console.log(`   Agent: ${manifest.agent}`);
@@ -324,15 +333,17 @@ async function verify(args: string[]) {
     console.log(`\n   ✅ Matches last backup (${state.lastBackup.timestamp})`);
     console.log(`   📦 ${state.lastBackup.fileCount} files, ${(state.lastBackup.totalSize / 1024).toFixed(1)} KB`);
     console.log(`   🔑 Plaintext hash: ${state.lastBackup.plaintextHash}`);
-    return;
-  }
-
-  const historyMatch = state?.history.find(h => h.encryptedHash === encHash);
-  if (historyMatch) {
-    console.log(`\n   ✅ Matches historical backup (${historyMatch.timestamp})`);
-    console.log(`   📦 ${historyMatch.fileCount} files`);
-    console.log(`   🔑 Plaintext hash: ${historyMatch.plaintextHash}`);
-    return;
+    if (!needsDecrypt) return;
+    console.log('   (--decrypt requested, verifying via decryption too...)');
+  } else {
+    const historyMatch = state?.history.find(h => h.encryptedHash === encHash);
+    if (historyMatch) {
+      console.log(`\n   ✅ Matches historical backup (${historyMatch.timestamp})`);
+      console.log(`   📦 ${historyMatch.fileCount} files`);
+      console.log(`   🔑 Plaintext hash: ${historyMatch.plaintextHash}`);
+      if (!needsDecrypt) return;
+      console.log('   (--decrypt requested, verifying via decryption too...)');
+    }
   }
 
   if (!needsDecrypt) {
@@ -344,7 +355,16 @@ async function verify(args: string[]) {
   // Decrypt-based verification
   const passphrase = getPassphrase(args);
   console.log('\n🔐 Decrypting for verification...');
-  const decrypted = decrypt(encrypted, passphrase);
+  let decrypted: Buffer;
+  try {
+    decrypted = decrypt(encrypted, passphrase);
+  } catch (e: any) {
+    if (e.message?.includes('Unsupported state') || e.code === 'ERR_OSSL_EVP_BAD_DECRYPT') {
+      console.error('❌ Wrong passphrase or corrupted file.');
+      process.exit(1);
+    }
+    throw e;
+  }
   const { manifest, files } = unpack(decrypted);
 
   const { createHash } = require('crypto');
