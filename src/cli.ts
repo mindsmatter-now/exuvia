@@ -79,12 +79,31 @@ function hasFlag(args: string[], flag: string): boolean {
 }
 
 function getPassphrase(args: string[]): string {
-  const pp = getArg(args, '--passphrase') || process.env.EXUVIA_PASSPHRASE;
-  if (!pp) {
-    console.error('❌ Passphrase required. Use --passphrase <pp> or set EXUVIA_PASSPHRASE');
-    process.exit(1);
+  // Priority: --passphrase-file > --passphrase-stdin > --passphrase > ENV
+  const ppFile = getArg(args, '--passphrase-file');
+  if (ppFile) {
+    if (!existsSync(ppFile)) {
+      console.error(`❌ Passphrase file not found: ${ppFile}`);
+      process.exit(1);
+    }
+    return readFileSync(ppFile, 'utf-8').trim();
   }
-  return pp;
+
+  const ppDirect = getArg(args, '--passphrase');
+  if (ppDirect) {
+    console.warn('⚠️  Warning: Passphrase visible in process list (ps aux).');
+    console.warn('   Use --passphrase-file or EXUVIA_PASSPHRASE for production.\n');
+    return ppDirect;
+  }
+
+  const ppEnv = process.env.EXUVIA_PASSPHRASE;
+  if (ppEnv) return ppEnv;
+
+  console.error('❌ Passphrase required. Options:');
+  console.error('   --passphrase-file <path>   Read from file (recommended)');
+  console.error('   EXUVIA_PASSPHRASE env      Set as environment variable');
+  console.error('   --passphrase <value>       Direct (⚠️ visible in ps!)');
+  process.exit(1);
 }
 
 interface StateFile {
@@ -372,7 +391,12 @@ async function shamirRecover(args: string[]) {
   console.log(`🔐 Reconstructing passphrase from ${shares.length} shares...\n`);
 
   const passphrase = await combineShares(shares);
-  console.log(`   ✅ Passphrase recovered: ${passphrase}`);
+
+  // F7: Don't print passphrase to terminal scrollback
+  console.log('   ✅ Passphrase recovered successfully.');
+  console.log('   Writing to /dev/stdout without newline (pipe-safe)...');
+  console.log('   Tip: pipe to a file or use: exuvia shamir-recover <s1> <s2> > /tmp/pp.txt\n');
+  process.stdout.write(passphrase);
 }
 
 async function status(args: string[]) {
