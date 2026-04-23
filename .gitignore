@@ -5,3 +5,4 @@ dist/
 .env
 .exuvia.json
 arweave-wallet.json
+.exuvia-state.json
