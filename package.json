@@ -1,6 +1,6 @@
 {
   "name": "@mindsmatter/exuvia",
-  "version": "0.1.0-alpha.1",
+  "version": "0.2.0-alpha.1",
   "description": "Encrypted AI identity backup on Arweave",
   "main": "dist/index.js",
   "bin": {
@@ -32,10 +32,12 @@
     "node": ">=18"
   },
   "dependencies": {
-    "arweave": "^1.15.7"
+    "arweave": "^1.15.7",
+    "shamir-secret-sharing": "^0.0.4"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "prettier": "^3.2.0"
+    "@types/node": "^25.6.0",
+    "prettier": "^3.2.0",
+    "typescript": "^5.4.0"
   }
 }

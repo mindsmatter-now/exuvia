@@ -6,3 +6,6 @@ dist/
 .exuvia.json
 arweave-wallet.json
 .exuvia-state.json
+.exuvia-state.json
+dist/
+*.enc
