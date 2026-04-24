@@ -13,3 +13,5 @@ export type { EncryptedBlob } from './crypto.js';
 export type { PackManifest, PackResult } from './packer.js';
 export { splitPassphrase, combineShares, shareToHex, hexToShare } from './shamir.js';
 export type { ShamirShares } from './shamir.js';
+export { upload, download, getTxStatus, getBalance } from './arweave.js';
+export type { ArweaveConfig, UploadResult, DownloadResult } from './arweave.js';

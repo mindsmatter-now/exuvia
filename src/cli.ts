@@ -146,14 +146,14 @@ async function backup(args: string[]) {
   const agent = process.env.EXUVIA_AGENT || 'unknown';
   const passphrase = getPassphrase(args);
 
-  console.log(`🦞 Exuvia Backup — ${dryRun ? 'DRY RUN' : 'LIVE'}`);
-  console.log(`   Workspace: ${workspace}`);
-  console.log(`   Agent: ${agent}\n`);
+  log(`🦞 Exuvia Backup — ${dryRun ? 'DRY RUN' : 'LIVE'}`);
+  log(`   Workspace: ${workspace}`);
+  log(`   Agent: ${agent}\n`);
 
   // 1. Collect
-  console.log('📦 Collecting identity files...');
+  log('📦 Collecting identity files...');
   const files = collectFiles(workspace, DEFAULT_FILES, DEFAULT_DIRS);
-  console.log(`   ${files.size} files collected\n`);
+  log(`   ${files.size} files collected\n`);
 
   if (files.size === 0) {
     console.error('❌ No files found! Check workspace path.');
@@ -161,13 +161,13 @@ async function backup(args: string[]) {
   }
 
   // 2. Pack
-  console.log('📦 Packing...');
+  log('📦 Packing...');
   const { blob, manifest, fileCount, totalSize } = pack(files, agent);
-  console.log(`   ${fileCount} files, ${(totalSize / 1024).toFixed(1)} KB\n`);
+  log(`   ${fileCount} files, ${(totalSize / 1024).toFixed(1)} KB\n`);
 
   // 3. Hash
   const plaintextHash = sha256(blob);
-  console.log(`🔑 Plaintext SHA-256: ${plaintextHash}\n`);
+  log(`🔑 Plaintext SHA-256: ${plaintextHash}\n`);
 
   // 4. Diff against previous backup
   const prevState = loadState(workspace);
@@ -183,42 +183,42 @@ async function backup(args: string[]) {
     const modified = Object.keys(currentFiles).filter(f => f in prevFiles && prevFiles[f] !== currentFiles[f]);
     const unchanged = Object.keys(currentFiles).filter(f => f in prevFiles && prevFiles[f] === currentFiles[f]);
 
-    console.log(`📊 Diff since last backup (${prevState.lastBackup.timestamp}):`);
-    if (added.length) console.log(`   ✅ Added: ${added.length} files`);
-    if (modified.length) console.log(`   ✏️  Modified: ${modified.length} files`);
-    if (removed.length) console.log(`   ❌ Removed: ${removed.length} files`);
-    console.log(`   ⚪ Unchanged: ${unchanged.length} files\n`);
+    log(`📊 Diff since last backup (${prevState.lastBackup.timestamp}):`);
+    if (added.length) log(`   ✅ Added: ${added.length} files`);
+    if (modified.length) log(`   ✏️  Modified: ${modified.length} files`);
+    if (removed.length) log(`   ❌ Removed: ${removed.length} files`);
+    log(`   ⚪ Unchanged: ${unchanged.length} files\n`);
   }
 
   if (dryRun) {
-    console.log(`🏁 DRY RUN complete. No encryption or file output.`);
-    console.log(`   Estimated encrypted size: ~${(totalSize * 1.05 / 1024).toFixed(1)} KB`);
+    log(`🏁 DRY RUN complete. No encryption or file output.`);
+    log(`   Estimated encrypted size: ~${(totalSize * 1.05 / 1024).toFixed(1)} KB`);
     return;
   }
 
   // 5. Encrypt
-  console.log('🔐 Encrypting (AES-256-GCM + scrypt)...');
+  log('🔐 Encrypting (AES-256-GCM + scrypt)...');
   const { data: encrypted, hash } = encrypt(blob, passphrase);
-  console.log(`   Encrypted: ${(encrypted.length / 1024).toFixed(1)} KB\n`);
+  log(`   Encrypted: ${(encrypted.length / 1024).toFixed(1)} KB\n`);
 
   // 6. Verify roundtrip
-  console.log('✅ Verify: decrypt roundtrip...');
+  log('✅ Verify: decrypt roundtrip...');
   const decrypted = decrypt(encrypted, passphrase, hash);
   const { files: restored } = unpack(decrypted);
   if (restored.size !== fileCount) {
     console.error(`❌ File count mismatch: ${restored.size} vs ${fileCount}`);
     process.exit(1);
   }
-  console.log(`   ✅ ${restored.size} files recovered, hash verified\n`);
+  log(`   ✅ ${restored.size} files recovered, hash verified\n`);
 
   // 7. Save encrypted file
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const outPath = join(workspace, `exuvia-${agent}-${timestamp}.enc`);
   writeFileSync(outPath, encrypted);
-  console.log(`💾 Saved: ${outPath}`);
-  console.log(`   Plaintext hash: ${hash}`);
-  console.log(`   Encrypted hash: ${sha256(encrypted)}`);
-  console.log(`   Size: ${(encrypted.length / 1024).toFixed(1)} KB`);
+  log(`💾 Saved: ${outPath}`);
+  log(`   Plaintext hash: ${hash}`);
+  log(`   Encrypted hash: ${sha256(encrypted)}`);
+  log(`   Size: ${(encrypted.length / 1024).toFixed(1)} KB`);
 
   // 8. Update state file
   const fileHashes: Record<string, string> = {};
@@ -248,7 +248,7 @@ async function backup(args: string[]) {
     files: fileHashes,
   };
   saveState(workspace, state);
-  console.log(`\n📋 State updated: ${STATE_FILE}`);
+  log(`\n📋 State updated: ${STATE_FILE}`);
 }
 
 async function restore(args: string[]) {
@@ -261,11 +261,11 @@ async function restore(args: string[]) {
   const passphrase = getPassphrase(args);
   const outputDir = getArg(args, '--output') || './restored';
 
-  console.log(`🦞 Exuvia Restore — ${file}`);
-  console.log(`   Output: ${outputDir}\n`);
+  log(`🦞 Exuvia Restore — ${file}`);
+  log(`   Output: ${outputDir}\n`);
 
   const encrypted = readFileSync(file);
-  console.log('🔐 Decrypting...');
+  log('🔐 Decrypting...');
   let decrypted: Buffer;
   try {
     decrypted = decrypt(encrypted, passphrase);
@@ -278,9 +278,9 @@ async function restore(args: string[]) {
   }
 
   const { manifest, files } = unpack(decrypted);
-  console.log(`   Agent: ${manifest.agent}`);
-  console.log(`   Backup date: ${manifest.timestamp}`);
-  console.log(`   Files: ${files.size}\n`);
+  log(`   Agent: ${manifest.agent}`);
+  log(`   Backup date: ${manifest.timestamp}`);
+  log(`   Files: ${files.size}\n`);
 
   // Verify per-file hashes
   const { createHash } = require('crypto');
@@ -296,7 +296,7 @@ async function restore(args: string[]) {
       verified++;
     }
   }
-  console.log(`✅ ${verified} files verified\n`);
+  log(`✅ ${verified} files verified\n`);
 
   // Write files to disk (Tyto Finding F2!)
   mkdirSync(outputDir, { recursive: true });
@@ -304,10 +304,10 @@ async function restore(args: string[]) {
     const outPath = join(outputDir, name);
     mkdirSync(dirname(outPath), { recursive: true });
     writeFileSync(outPath, data);
-    console.log(`   📄 ${name} (${(data.length / 1024).toFixed(1)} KB)`);
+    log(`   📄 ${name} (${(data.length / 1024).toFixed(1)} KB)`);
   }
 
-  console.log(`\n✅ ${files.size} files restored to ${outputDir}/`);
+  log(`\n✅ ${files.size} files restored to ${outputDir}/`);
 }
 
 async function verify(args: string[]) {
@@ -319,42 +319,42 @@ async function verify(args: string[]) {
     process.exit(1);
   }
 
-  console.log(`🦞 Exuvia Verify — ${file}\n`);
+  log(`🦞 Exuvia Verify — ${file}\n`);
   const encrypted = readFileSync(file);
   const encHash = sha256(encrypted);
-  console.log(`   Size: ${(encrypted.length / 1024).toFixed(1)} KB`);
-  console.log(`   SHA-256: ${encHash}`);
+  log(`   Size: ${(encrypted.length / 1024).toFixed(1)} KB`);
+  log(`   SHA-256: ${encHash}`);
 
   // Try state file first (Tyto Finding F3!)
   const workspace = getArg(args, '--workspace') || process.env.EXUVIA_WORKSPACE || process.cwd();
   const state = loadState(workspace);
 
   if (state?.lastBackup?.encryptedHash === encHash) {
-    console.log(`\n   ✅ Matches last backup (${state.lastBackup.timestamp})`);
-    console.log(`   📦 ${state.lastBackup.fileCount} files, ${(state.lastBackup.totalSize / 1024).toFixed(1)} KB`);
-    console.log(`   🔑 Plaintext hash: ${state.lastBackup.plaintextHash}`);
+    log(`\n   ✅ Matches last backup (${state.lastBackup.timestamp})`);
+    log(`   📦 ${state.lastBackup.fileCount} files, ${(state.lastBackup.totalSize / 1024).toFixed(1)} KB`);
+    log(`   🔑 Plaintext hash: ${state.lastBackup.plaintextHash}`);
     if (!needsDecrypt) return;
-    console.log('   (--decrypt requested, verifying via decryption too...)');
+    log('   (--decrypt requested, verifying via decryption too...)');
   } else {
     const historyMatch = state?.history.find(h => h.encryptedHash === encHash);
     if (historyMatch) {
-      console.log(`\n   ✅ Matches historical backup (${historyMatch.timestamp})`);
-      console.log(`   📦 ${historyMatch.fileCount} files`);
-      console.log(`   🔑 Plaintext hash: ${historyMatch.plaintextHash}`);
+      log(`\n   ✅ Matches historical backup (${historyMatch.timestamp})`);
+      log(`   📦 ${historyMatch.fileCount} files`);
+      log(`   🔑 Plaintext hash: ${historyMatch.plaintextHash}`);
       if (!needsDecrypt) return;
-      console.log('   (--decrypt requested, verifying via decryption too...)');
+      log('   (--decrypt requested, verifying via decryption too...)');
     }
   }
 
   if (!needsDecrypt) {
-    console.log(`\n   ⚠️  No matching entry in ${STATE_FILE}.`);
-    console.log(`   Use 'exuvia verify --decrypt ${file}' to verify with passphrase.`);
+    log(`\n   ⚠️  No matching entry in ${STATE_FILE}.`);
+    log(`   Use 'exuvia verify --decrypt ${file}' to verify with passphrase.`);
     return;
   }
 
   // Decrypt-based verification
   const passphrase = getPassphrase(args);
-  console.log('\n🔐 Decrypting for verification...');
+  log('\n🔐 Decrypting for verification...');
   let decrypted: Buffer;
   try {
     decrypted = decrypt(encrypted, passphrase);
@@ -380,9 +380,9 @@ async function verify(args: string[]) {
   }
 
   if (fail === 0) {
-    console.log(`\n   ✅ All ${ok} files verified! Backup is intact.`);
-    console.log(`   Agent: ${manifest.agent}`);
-    console.log(`   Date: ${manifest.timestamp}`);
+    log(`\n   ✅ All ${ok} files verified! Backup is intact.`);
+    log(`   Agent: ${manifest.agent}`);
+    log(`   Date: ${manifest.timestamp}`);
   } else {
     console.error(`\n   ❌ ${fail} files FAILED verification!`);
     process.exit(1);
@@ -394,10 +394,10 @@ async function shamir(args: string[]) {
   const holdersArg = getArg(args, '--holders');
   const holders = holdersArg ? holdersArg.split(',') : ['kiro', 'tyto', 'alex'];
 
-  console.log(`🔐 Generating Shamir shares (2-of-${holders.length})...\n`);
+  log(`🔐 Generating Shamir shares (2-of-${holders.length})...\n`);
 
   const result = await splitPassphrase(passphrase, holders);
-  console.log(formatSharesForDistribution(result));
+  log(formatSharesForDistribution(result));
 }
 
 async function shamirRecover(args: string[]) {
@@ -408,14 +408,14 @@ async function shamirRecover(args: string[]) {
   }
 
   const shares = hexShares.map(hexToShare);
-  console.log(`🔐 Reconstructing passphrase from ${shares.length} shares...\n`);
+  log(`🔐 Reconstructing passphrase from ${shares.length} shares...\n`);
 
   const passphrase = await combineShares(shares);
 
   // F7: Don't print passphrase to terminal scrollback
-  console.log('   ✅ Passphrase recovered successfully.');
-  console.log('   Writing to /dev/stdout without newline (pipe-safe)...');
-  console.log('   Tip: pipe to a file or use: exuvia shamir-recover <s1> <s2> > /tmp/pp.txt\n');
+  log('   ✅ Passphrase recovered successfully.');
+  log('   Writing to /dev/stdout without newline (pipe-safe)...');
+  log('   Tip: pipe to a file or use: exuvia shamir-recover <s1> <s2> > /tmp/pp.txt\n');
   process.stdout.write(passphrase);
 }
 
@@ -423,25 +423,25 @@ async function status(args: string[]) {
   const workspace = getArg(args, '--workspace') || process.env.EXUVIA_WORKSPACE || process.cwd();
   const state = loadState(workspace);
 
-  console.log(`🦞 Exuvia v${VERSION}\n`);
+  log(`🦞 Exuvia v${VERSION}\n`);
 
   if (!state?.lastBackup) {
-    console.log('   No backups found. Run `exuvia backup` first.');
+    log('   No backups found. Run `exuvia backup` first.');
     return;
   }
 
   const lb = state.lastBackup;
-  console.log(`   Last backup: ${lb.timestamp}`);
-  console.log(`   Files: ${lb.fileCount}`);
-  console.log(`   Size: ${(lb.totalSize / 1024).toFixed(1)} KB (plain) / ${(lb.encryptedSize / 1024).toFixed(1)} KB (encrypted)`);
-  console.log(`   File: ${lb.outputFile}`);
-  console.log(`   Plaintext hash: ${lb.plaintextHash}`);
-  console.log(`   Encrypted hash: ${lb.encryptedHash}`);
+  log(`   Last backup: ${lb.timestamp}`);
+  log(`   Files: ${lb.fileCount}`);
+  log(`   Size: ${(lb.totalSize / 1024).toFixed(1)} KB (plain) / ${(lb.encryptedSize / 1024).toFixed(1)} KB (encrypted)`);
+  log(`   File: ${lb.outputFile}`);
+  log(`   Plaintext hash: ${lb.plaintextHash}`);
+  log(`   Encrypted hash: ${lb.encryptedHash}`);
 
   if (state.history.length > 0) {
-    console.log(`\n   📜 History (${state.history.length} previous):`);
+    log(`\n   📜 History (${state.history.length} previous):`);
     for (const h of state.history.slice(0, 5)) {
-      console.log(`      ${h.timestamp} — ${h.fileCount} files — ${h.outputFile}`);
+      log(`      ${h.timestamp} — ${h.fileCount} files — ${h.outputFile}`);
     }
   }
 }
@@ -449,6 +449,8 @@ async function status(args: string[]) {
 // --- Main ---
 
 const [command, ...args] = process.argv.slice(2);
+const QUIET = args.includes('--quiet') || args.includes('-q');
+const log = (...a: any[]) => { if (!QUIET) console.log(...a); };
 
 switch (command) {
   case 'backup': backup(args); break;
@@ -460,8 +462,8 @@ switch (command) {
   case 'version':
   case '--version':
   case '-v':
-    console.log(VERSION);
+    log(VERSION);
     break;
   default:
-    console.log(USAGE);
+    log(USAGE);
 }
