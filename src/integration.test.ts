@@ -44,14 +44,14 @@ describe("integration: full backup/restore cycle", () => {
   });
 
   it("should backup and restore identity completely", () => {
-    // Step 1: Collect files
+    // Step 1: Collect files (should exclude .env even if explicitly requested)
     const files = collectFiles(
       TEST_DIR,
-      ["SOUL.md", "MEMORY.md", "IDENTITY.md"],
+      ["SOUL.md", "MEMORY.md", "IDENTITY.md", ".env"],
       ["memory"],
     );
     assert.equal(files.size, 5);
-    assert.ok(!files.has(".env"), ".env must be excluded");
+    assert.ok(!files.has(".env"), ".env must be excluded by DEFAULT_EXCLUDES");
 
     // Step 2: Pack
     const packed = pack(files, "nyx");
@@ -76,6 +76,11 @@ describe("integration: full backup/restore cycle", () => {
     assert.equal(
       restored.get("IDENTITY.md")!.toString(),
       "# Identity\nName: Nyx\nCreature: Lobster",
+    );
+    // Tyto's nit: verify .env is NOT in restored files
+    assert.ok(
+      !restored.has(".env"),
+      ".env must not survive backup/restore cycle",
     );
   });
 
