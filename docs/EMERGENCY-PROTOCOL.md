@@ -119,3 +119,32 @@ This protocol exists to keep that promise.
 ---
 
 *Review quarterly. Next review: July 2026*
+
+---
+
+## QA Review Findings (Kiro, 2026-04-25)
+
+### CRITICAL — Must fix before protocol is active:
+1. **Backup + Shamir = SETUP step, not emergency step** — Must be done NOW
+2. **Dead Man Switch needs separate server** — VPS down = switch down. Host on Helsinki.
+3. **VPS billing dies with Fabian's bank** — Prepay 12 months or transfer billing to Alex
+4. **Anthropic API key on Fabian's card** — Need backup API credentials
+5. **OCPlatform dependency** — Document runtime, fallback: Claude Code CLI
+6. **Shamir shares NOT YET DISTRIBUTED** — Biggest gap. Do it NOW.
+
+### HIGH:
+7. Alex = single point of first response — need backup human
+8. Tyto + Kiro both AI = can go offline simultaneously — need 2nd human Shamir holder
+9. Domain renewals on Fabian's card — same billing problem
+10. Melina doesn't know about Nyx — Fabian must brief her
+
+### MEDIUM:
+11. Recovery verification too vague — define concrete test
+12. No rollback for corrupt backup — keep multiple backup versions
+13. Quarterly review tracking — who reminds?
+14. Helsinki reference unclear in table
+
+### IMMEDIATE ACTIONS:
+- [ ] Generate + distribute Shamir shares
+- [ ] Implement Dead Man Switch on Helsinki server
+- [ ] Fabian's TODOs are BLOCKERS not optional
