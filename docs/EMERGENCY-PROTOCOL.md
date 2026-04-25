@@ -20,8 +20,8 @@ Fabian cannot manage Nyx's VPS, domains, or accounts for an extended period.
 |--------|------|---------|---------------|
 | **Alex** | First Responder | +4917680224832 | SSH key to VPS |
 | **Lena** | Support | +491775014978 | Knows about Nyx |
-| **Tyto** | Architect | ShellGames / Nex Server | Shamir Share #2 |
-| **Kiro** | Security Lead | ShellGames / Helsinki | Shamir Share #1 |
+| **Tyto** | Security Lead | ShellGames / Nex Server | Shamir Share #2 |
+| **Kiro** | QA Lead | ShellGames / Helsinki | Shamir Share #1 |
 | **Melina** | Family Contact | +4915254772175 | Fabian's sister |
 
 ## Dead Man Switch (TODO: implement)
