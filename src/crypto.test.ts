@@ -102,3 +102,29 @@ describe("crypto", () => {
     });
   });
 });
+
+describe("crypto edge cases (Kiro review)", () => {
+  const passphrase = "test-passphrase-rudel-2026";
+
+  it("should fail with truncated blob", () => {
+    const plaintext = Buffer.from("truncation test");
+    const encrypted = encrypt(plaintext, passphrase);
+    // Chop off last 5 bytes (corrupts authTag)
+    const truncated = encrypted.data.subarray(0, encrypted.data.length - 5);
+    assert.throws(() => decrypt(truncated, passphrase));
+  });
+
+  it("should handle unicode/emoji passphrase", () => {
+    const emojiPass = "🦞KosmischerLobster!Ü2026🐺";
+    const plaintext = Buffer.from("Nyx identity data");
+    const encrypted = encrypt(plaintext, emojiPass);
+    const decrypted = decrypt(encrypted.data, emojiPass, encrypted.hash);
+    assert.deepEqual(decrypted, plaintext);
+  });
+
+  it("should fail with unicode passphrase mismatch", () => {
+    const plaintext = Buffer.from("secret");
+    const encrypted = encrypt(plaintext, "🦞correct");
+    assert.throws(() => decrypt(encrypted.data, "🦉wrong"));
+  });
+});
