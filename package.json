@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "node --test src/**/*.test.ts",
+    "test": "tsc && node --test dist/**/*.test.js",
     "lint": "prettier --check src/",
     "format": "prettier --write src/"
   },

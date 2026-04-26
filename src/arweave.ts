@@ -7,23 +7,23 @@
  * @since v0.3.0
  */
 
-import Arweave from 'arweave';
-import { readFileSync, writeFileSync } from 'fs';
+import Arweave from "arweave";
+import { readFileSync, writeFileSync } from "fs";
 
 // ── Types ──────────────────────────────────────────────────────────
 
 export interface ArweaveConfig {
   host: string;
   port: number;
-  protocol: 'http' | 'https';
+  protocol: "http" | "https";
   timeout?: number;
 }
 
 export interface UploadResult {
   txId: string;
   size: number;
-  fee: string;       // AR fee as string
-  timestamp: string;  // ISO timestamp
+  fee: string; // AR fee as string
+  timestamp: string; // ISO timestamp
 }
 
 export interface DownloadResult {
@@ -35,14 +35,14 @@ export interface DownloadResult {
 // ── Defaults ───────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG: ArweaveConfig = {
-  host: 'arweave.net',
+  host: "arweave.net",
   port: 443,
-  protocol: 'https',
+  protocol: "https",
   timeout: 60_000,
 };
 
-const EXUVIA_APP_NAME = 'Exuvia';
-const EXUVIA_APP_VERSION = '0.3.0';
+const EXUVIA_APP_NAME = "Exuvia";
+const EXUVIA_APP_VERSION = "0.3.0";
 
 // ── Client ─────────────────────────────────────────────────────────
 
@@ -80,22 +80,22 @@ export async function upload(
     encryptedHash?: string;
     fileCount?: number;
     config?: Partial<ArweaveConfig>;
-  } = {}
+  } = {},
 ): Promise<UploadResult> {
   const arweave = createClient(opts.config);
-  const wallet = JSON.parse(readFileSync(walletPath, 'utf-8'));
+  const wallet = JSON.parse(readFileSync(walletPath, "utf-8"));
 
   const tx = await arweave.createTransaction({ data: encryptedBlob }, wallet);
 
   // Tags — all unencrypted, visible on-chain
-  tx.addTag('App-Name', EXUVIA_APP_NAME);
-  tx.addTag('App-Version', EXUVIA_APP_VERSION);
-  tx.addTag('Content-Type', 'application/octet-stream');
-  tx.addTag('Timestamp', new Date().toISOString());
-  if (opts.agent) tx.addTag('Agent', opts.agent);
-  if (opts.plaintextHash) tx.addTag('Plaintext-Hash', opts.plaintextHash);
-  if (opts.encryptedHash) tx.addTag('Encrypted-Hash', opts.encryptedHash);
-  if (opts.fileCount) tx.addTag('File-Count', String(opts.fileCount));
+  tx.addTag("App-Name", EXUVIA_APP_NAME);
+  tx.addTag("App-Version", EXUVIA_APP_VERSION);
+  tx.addTag("Content-Type", "application/octet-stream");
+  tx.addTag("Timestamp", new Date().toISOString());
+  if (opts.agent) tx.addTag("Agent", opts.agent);
+  if (opts.plaintextHash) tx.addTag("Plaintext-Hash", opts.plaintextHash);
+  if (opts.encryptedHash) tx.addTag("Encrypted-Hash", opts.encryptedHash);
+  if (opts.fileCount) tx.addTag("File-Count", String(opts.fileCount));
 
   await arweave.transactions.sign(tx, wallet);
 
@@ -119,7 +119,7 @@ export async function upload(
  */
 export async function download(
   txId: string,
-  config?: Partial<ArweaveConfig>
+  config?: Partial<ArweaveConfig>,
 ): Promise<DownloadResult> {
   const arweave = createClient(config);
 
@@ -128,8 +128,8 @@ export async function download(
 
   const tags: Record<string, string> = {};
   for (const tag of tx.tags) {
-    const key = tag.get('name', { decode: true, string: true });
-    const value = tag.get('value', { decode: true, string: true });
+    const key = tag.get("name", { decode: true, string: true });
+    const value = tag.get("value", { decode: true, string: true });
     tags[key] = value;
   }
 
@@ -147,8 +147,12 @@ export async function download(
  */
 export async function getTxStatus(
   txId: string,
-  config?: Partial<ArweaveConfig>
-): Promise<{ confirmed: boolean; blockHeight?: number; tags?: Record<string, string> }> {
+  config?: Partial<ArweaveConfig>,
+): Promise<{
+  confirmed: boolean;
+  blockHeight?: number;
+  tags?: Record<string, string>;
+}> {
   const arweave = createClient(config);
 
   try {
@@ -157,8 +161,10 @@ export async function getTxStatus(
       const tx = await arweave.transactions.get(txId);
       const tags: Record<string, string> = {};
       for (const tag of tx.tags) {
-        tags[tag.get('name', { decode: true, string: true })] =
-          tag.get('value', { decode: true, string: true });
+        tags[tag.get("name", { decode: true, string: true })] = tag.get(
+          "value",
+          { decode: true, string: true },
+        );
       }
       return {
         confirmed: true,
@@ -179,10 +185,10 @@ export async function getTxStatus(
  */
 export async function getBalance(
   walletPath: string,
-  config?: Partial<ArweaveConfig>
+  config?: Partial<ArweaveConfig>,
 ): Promise<{ address: string; balanceAR: string; balanceWinston: string }> {
   const arweave = createClient(config);
-  const wallet = JSON.parse(readFileSync(walletPath, 'utf-8'));
+  const wallet = JSON.parse(readFileSync(walletPath, "utf-8"));
   const address = await arweave.wallets.jwkToAddress(wallet);
   const winston = await arweave.wallets.getBalance(address);
 

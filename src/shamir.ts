@@ -7,7 +7,7 @@
  * Approved by Kiro 🐺, architecture by Tyto 🦉
  */
 
-import { split, combine } from 'shamir-secret-sharing';
+import { split, combine } from "shamir-secret-sharing";
 
 export interface ShamirShares {
   threshold: number;
@@ -18,7 +18,7 @@ export interface ShamirShares {
 
 const DEFAULT_THRESHOLD = 2;
 const DEFAULT_TOTAL = 3;
-const DEFAULT_HOLDERS = ['kiro', 'tyto', 'alex'];
+const DEFAULT_HOLDERS = ["kiro", "tyto", "alex"];
 
 /**
  * Split a passphrase into Shamir shares (2-of-3)
@@ -26,7 +26,7 @@ const DEFAULT_HOLDERS = ['kiro', 'tyto', 'alex'];
 export async function splitPassphrase(
   passphrase: string,
   holders: string[] = DEFAULT_HOLDERS,
-  threshold: number = DEFAULT_THRESHOLD
+  threshold: number = DEFAULT_THRESHOLD,
 ): Promise<ShamirShares> {
   const secret = new TextEncoder().encode(passphrase);
   const total = holders.length;
@@ -35,7 +35,7 @@ export async function splitPassphrase(
     throw new Error(`Need at least ${threshold} holders, got ${total}`);
   }
   if (threshold < 2) {
-    throw new Error('Threshold must be at least 2');
+    throw new Error("Threshold must be at least 2");
   }
 
   const shares = await split(secret, total, threshold);
@@ -53,7 +53,7 @@ export async function splitPassphrase(
  */
 export async function combineShares(shares: Uint8Array[]): Promise<string> {
   if (shares.length < 2) {
-    throw new Error('Need at least 2 shares to reconstruct');
+    throw new Error("Need at least 2 shares to reconstruct");
   }
 
   const secret = await combine(shares);
@@ -64,14 +64,14 @@ export async function combineShares(shares: Uint8Array[]): Promise<string> {
  * Encode a share as hex string (for safe transport/storage)
  */
 export function shareToHex(share: Uint8Array): string {
-  return Buffer.from(share).toString('hex');
+  return Buffer.from(share).toString("hex");
 }
 
 /**
  * Decode a hex string back to share
  */
 export function hexToShare(hex: string): Uint8Array {
-  return new Uint8Array(Buffer.from(hex, 'hex'));
+  return new Uint8Array(Buffer.from(hex, "hex"));
 }
 
 /**
@@ -90,8 +90,8 @@ export function formatSharesForDistribution(result: ShamirShares): string {
     lines.push(`   ${shareToHex(result.shares[i])}\n`);
   }
 
-  lines.push('⚠️  NEVER send multiple shares over the same channel!');
-  lines.push('⚠️  Each holder stores their share independently.');
+  lines.push("⚠️  NEVER send multiple shares over the same channel!");
+  lines.push("⚠️  Each holder stores their share independently.");
 
-  return lines.join('\n');
+  return lines.join("\n");
 }

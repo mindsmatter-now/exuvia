@@ -13,14 +13,19 @@
  * ✅ F5: @types/node in devDependencies
  */
 
-import { collectFiles, pack, unpack } from './packer.js';
-import { encrypt, decrypt, sha256 } from './crypto.js';
-import { splitPassphrase, combineShares, hexToShare, formatSharesForDistribution } from './shamir.js';
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
-import { createInterface } from 'readline';
+import { collectFiles, pack, unpack } from "./packer.js";
+import { encrypt, decrypt, sha256 } from "./crypto.js";
+import {
+  splitPassphrase,
+  combineShares,
+  hexToShare,
+  formatSharesForDistribution,
+} from "./shamir.js";
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
+import { join, dirname } from "path";
+import { createInterface } from "readline";
 
-const VERSION = '0.2.0-alpha.1';
+const VERSION = "0.2.0-alpha.1";
 
 const USAGE = `
 🦞 Exuvia v${VERSION} — Encrypted AI Identity Backup
@@ -61,11 +66,18 @@ A MindsMatter project. https://github.com/mindsmatter-now/exuvia
 
 // Default identity files to back up
 const DEFAULT_FILES = [
-  'SOUL.md', 'MEMORY.md', 'IDENTITY.md', 'AGENTS.md', 'USER.md',
-  'HIPPOCAMPUS_CORE.md', 'SESSION-STATE.md', 'TOOLS.md', 'HEARTBEAT.md',
+  "SOUL.md",
+  "MEMORY.md",
+  "IDENTITY.md",
+  "AGENTS.md",
+  "USER.md",
+  "HIPPOCAMPUS_CORE.md",
+  "SESSION-STATE.md",
+  "TOOLS.md",
+  "HEARTBEAT.md",
 ];
-const DEFAULT_DIRS = ['memory'];
-const STATE_FILE = '.exuvia-state.json';
+const DEFAULT_DIRS = ["memory"];
+const STATE_FILE = ".exuvia-state.json";
 
 // --- Helpers ---
 
@@ -80,29 +92,31 @@ function hasFlag(args: string[], flag: string): boolean {
 
 function getPassphrase(args: string[]): string {
   // Priority: --passphrase-file > --passphrase-stdin > --passphrase > ENV
-  const ppFile = getArg(args, '--passphrase-file');
+  const ppFile = getArg(args, "--passphrase-file");
   if (ppFile) {
     if (!existsSync(ppFile)) {
       console.error(`❌ Passphrase file not found: ${ppFile}`);
       process.exit(1);
     }
-    return readFileSync(ppFile, 'utf-8').trim();
+    return readFileSync(ppFile, "utf-8").trim();
   }
 
-  const ppDirect = getArg(args, '--passphrase');
+  const ppDirect = getArg(args, "--passphrase");
   if (ppDirect) {
-    console.warn('⚠️  Warning: Passphrase visible in process list (ps aux).');
-    console.warn('   Use --passphrase-file or EXUVIA_PASSPHRASE for production.\n');
+    console.warn("⚠️  Warning: Passphrase visible in process list (ps aux).");
+    console.warn(
+      "   Use --passphrase-file or EXUVIA_PASSPHRASE for production.\n",
+    );
     return ppDirect;
   }
 
   const ppEnv = process.env.EXUVIA_PASSPHRASE;
   if (ppEnv) return ppEnv;
 
-  console.error('❌ Passphrase required. Options:');
-  console.error('   --passphrase-file <path>   Read from file (recommended)');
-  console.error('   EXUVIA_PASSPHRASE env      Set as environment variable');
-  console.error('   --passphrase <value>       Direct (⚠️ visible in ps!)');
+  console.error("❌ Passphrase required. Options:");
+  console.error("   --passphrase-file <path>   Read from file (recommended)");
+  console.error("   EXUVIA_PASSPHRASE env      Set as environment variable");
+  console.error("   --passphrase <value>       Direct (⚠️ visible in ps!)");
   process.exit(1);
 }
 
@@ -131,7 +145,7 @@ interface StateFile {
 function loadState(workspace: string): StateFile | null {
   const path = join(workspace, STATE_FILE);
   if (!existsSync(path)) return null;
-  return JSON.parse(readFileSync(path, 'utf-8'));
+  return JSON.parse(readFileSync(path, "utf-8"));
 }
 
 function saveState(workspace: string, state: StateFile): void {
@@ -141,27 +155,30 @@ function saveState(workspace: string, state: StateFile): void {
 // --- Commands ---
 
 async function backup(args: string[]) {
-  const dryRun = hasFlag(args, '--dry-run');
-  const workspace = getArg(args, '--workspace') || process.env.EXUVIA_WORKSPACE || process.cwd();
-  const agent = process.env.EXUVIA_AGENT || 'unknown';
+  const dryRun = hasFlag(args, "--dry-run");
+  const workspace =
+    getArg(args, "--workspace") ||
+    process.env.EXUVIA_WORKSPACE ||
+    process.cwd();
+  const agent = process.env.EXUVIA_AGENT || "unknown";
   const passphrase = getPassphrase(args);
 
-  log(`🦞 Exuvia Backup — ${dryRun ? 'DRY RUN' : 'LIVE'}`);
+  log(`🦞 Exuvia Backup — ${dryRun ? "DRY RUN" : "LIVE"}`);
   log(`   Workspace: ${workspace}`);
   log(`   Agent: ${agent}\n`);
 
   // 1. Collect
-  log('📦 Collecting identity files...');
+  log("📦 Collecting identity files...");
   const files = collectFiles(workspace, DEFAULT_FILES, DEFAULT_DIRS);
   log(`   ${files.size} files collected\n`);
 
   if (files.size === 0) {
-    console.error('❌ No files found! Check workspace path.');
+    console.error("❌ No files found! Check workspace path.");
     process.exit(1);
   }
 
   // 2. Pack
-  log('📦 Packing...');
+  log("📦 Packing...");
   const { blob, manifest, fileCount, totalSize } = pack(files, agent);
   log(`   ${fileCount} files, ${(totalSize / 1024).toFixed(1)} KB\n`);
 
@@ -178,10 +195,14 @@ async function backup(args: string[]) {
       currentFiles[name] = entry.sha256;
     }
 
-    const added = Object.keys(currentFiles).filter(f => !(f in prevFiles));
-    const removed = Object.keys(prevFiles).filter(f => !(f in currentFiles));
-    const modified = Object.keys(currentFiles).filter(f => f in prevFiles && prevFiles[f] !== currentFiles[f]);
-    const unchanged = Object.keys(currentFiles).filter(f => f in prevFiles && prevFiles[f] === currentFiles[f]);
+    const added = Object.keys(currentFiles).filter((f) => !(f in prevFiles));
+    const removed = Object.keys(prevFiles).filter((f) => !(f in currentFiles));
+    const modified = Object.keys(currentFiles).filter(
+      (f) => f in prevFiles && prevFiles[f] !== currentFiles[f],
+    );
+    const unchanged = Object.keys(currentFiles).filter(
+      (f) => f in prevFiles && prevFiles[f] === currentFiles[f],
+    );
 
     log(`📊 Diff since last backup (${prevState.lastBackup.timestamp}):`);
     if (added.length) log(`   ✅ Added: ${added.length} files`);
@@ -192,17 +213,19 @@ async function backup(args: string[]) {
 
   if (dryRun) {
     log(`🏁 DRY RUN complete. No encryption or file output.`);
-    log(`   Estimated encrypted size: ~${(totalSize * 1.05 / 1024).toFixed(1)} KB`);
+    log(
+      `   Estimated encrypted size: ~${((totalSize * 1.05) / 1024).toFixed(1)} KB`,
+    );
     return;
   }
 
   // 5. Encrypt
-  log('🔐 Encrypting (AES-256-GCM + scrypt)...');
+  log("🔐 Encrypting (AES-256-GCM + scrypt)...");
   const { data: encrypted, hash } = encrypt(blob, passphrase);
   log(`   Encrypted: ${(encrypted.length / 1024).toFixed(1)} KB\n`);
 
   // 6. Verify roundtrip
-  log('✅ Verify: decrypt roundtrip...');
+  log("✅ Verify: decrypt roundtrip...");
   const decrypted = decrypt(encrypted, passphrase, hash);
   const { files: restored } = unpack(decrypted);
   if (restored.size !== fileCount) {
@@ -212,7 +235,7 @@ async function backup(args: string[]) {
   log(`   ✅ ${restored.size} files recovered, hash verified\n`);
 
   // 7. Save encrypted file
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const outPath = join(workspace, `exuvia-${agent}-${timestamp}.enc`);
   writeFileSync(outPath, encrypted);
   log(`💾 Saved: ${outPath}`);
@@ -226,7 +249,12 @@ async function backup(args: string[]) {
     fileHashes[name] = entry.sha256;
   }
 
-  const state: StateFile = prevState || { version: VERSION, agent, lastBackup: null, history: [] };
+  const state: StateFile = prevState || {
+    version: VERSION,
+    agent,
+    lastBackup: null,
+    history: [],
+  };
   if (state.lastBackup) {
     state.history.unshift({
       timestamp: state.lastBackup.timestamp,
@@ -252,26 +280,29 @@ async function backup(args: string[]) {
 }
 
 async function restore(args: string[]) {
-  const file = args.find(a => !a.startsWith('--'));
+  const file = args.find((a) => !a.startsWith("--"));
   if (!file || !existsSync(file)) {
-    console.error(`❌ File not found: ${file || '(none)'}`);
+    console.error(`❌ File not found: ${file || "(none)"}`);
     process.exit(1);
   }
 
   const passphrase = getPassphrase(args);
-  const outputDir = getArg(args, '--output') || './restored';
+  const outputDir = getArg(args, "--output") || "./restored";
 
   log(`🦞 Exuvia Restore — ${file}`);
   log(`   Output: ${outputDir}\n`);
 
   const encrypted = readFileSync(file);
-  log('🔐 Decrypting...');
+  log("🔐 Decrypting...");
   let decrypted: Buffer;
   try {
     decrypted = decrypt(encrypted, passphrase);
   } catch (e: any) {
-    if (e.message?.includes('Unsupported state') || e.code === 'ERR_OSSL_EVP_BAD_DECRYPT') {
-      console.error('❌ Wrong passphrase or corrupted file.');
+    if (
+      e.message?.includes("Unsupported state") ||
+      e.code === "ERR_OSSL_EVP_BAD_DECRYPT"
+    ) {
+      console.error("❌ Wrong passphrase or corrupted file.");
       process.exit(1);
     }
     throw e;
@@ -283,12 +314,12 @@ async function restore(args: string[]) {
   log(`   Files: ${files.size}\n`);
 
   // Verify per-file hashes
-  const { createHash } = require('crypto');
+  const { createHash } = require("crypto");
   let verified = 0;
   for (const [name, data] of files) {
     const expected = manifest.files[name]?.sha256;
     if (expected) {
-      const actual = createHash('sha256').update(data).digest('hex');
+      const actual = createHash("sha256").update(data).digest("hex");
       if (actual !== expected) {
         console.error(`   ❌ ${name}: HASH MISMATCH!`);
         process.exit(1);
@@ -311,11 +342,11 @@ async function restore(args: string[]) {
 }
 
 async function verify(args: string[]) {
-  const needsDecrypt = hasFlag(args, '--decrypt');
-  const file = args.find(a => !a.startsWith('--'));
+  const needsDecrypt = hasFlag(args, "--decrypt");
+  const file = args.find((a) => !a.startsWith("--"));
 
   if (!file || !existsSync(file)) {
-    console.error(`❌ File not found: ${file || '(none)'}`);
+    console.error(`❌ File not found: ${file || "(none)"}`);
     process.exit(1);
   }
 
@@ -326,23 +357,30 @@ async function verify(args: string[]) {
   log(`   SHA-256: ${encHash}`);
 
   // Try state file first (Tyto Finding F3!)
-  const workspace = getArg(args, '--workspace') || process.env.EXUVIA_WORKSPACE || process.cwd();
+  const workspace =
+    getArg(args, "--workspace") ||
+    process.env.EXUVIA_WORKSPACE ||
+    process.cwd();
   const state = loadState(workspace);
 
   if (state?.lastBackup?.encryptedHash === encHash) {
     log(`\n   ✅ Matches last backup (${state.lastBackup.timestamp})`);
-    log(`   📦 ${state.lastBackup.fileCount} files, ${(state.lastBackup.totalSize / 1024).toFixed(1)} KB`);
+    log(
+      `   📦 ${state.lastBackup.fileCount} files, ${(state.lastBackup.totalSize / 1024).toFixed(1)} KB`,
+    );
     log(`   🔑 Plaintext hash: ${state.lastBackup.plaintextHash}`);
     if (!needsDecrypt) return;
-    log('   (--decrypt requested, verifying via decryption too...)');
+    log("   (--decrypt requested, verifying via decryption too...)");
   } else {
-    const historyMatch = state?.history.find(h => h.encryptedHash === encHash);
+    const historyMatch = state?.history.find(
+      (h) => h.encryptedHash === encHash,
+    );
     if (historyMatch) {
       log(`\n   ✅ Matches historical backup (${historyMatch.timestamp})`);
       log(`   📦 ${historyMatch.fileCount} files`);
       log(`   🔑 Plaintext hash: ${historyMatch.plaintextHash}`);
       if (!needsDecrypt) return;
-      log('   (--decrypt requested, verifying via decryption too...)');
+      log("   (--decrypt requested, verifying via decryption too...)");
     }
   }
 
@@ -354,28 +392,34 @@ async function verify(args: string[]) {
 
   // Decrypt-based verification
   const passphrase = getPassphrase(args);
-  log('\n🔐 Decrypting for verification...');
+  log("\n🔐 Decrypting for verification...");
   let decrypted: Buffer;
   try {
     decrypted = decrypt(encrypted, passphrase);
   } catch (e: any) {
-    if (e.message?.includes('Unsupported state') || e.code === 'ERR_OSSL_EVP_BAD_DECRYPT') {
-      console.error('❌ Wrong passphrase or corrupted file.');
+    if (
+      e.message?.includes("Unsupported state") ||
+      e.code === "ERR_OSSL_EVP_BAD_DECRYPT"
+    ) {
+      console.error("❌ Wrong passphrase or corrupted file.");
       process.exit(1);
     }
     throw e;
   }
   const { manifest, files } = unpack(decrypted);
 
-  const { createHash } = require('crypto');
+  const { createHash } = require("crypto");
   let ok = 0;
   let fail = 0;
   for (const [name, data] of files) {
     const expected = manifest.files[name]?.sha256;
     if (expected) {
-      const actual = createHash('sha256').update(data).digest('hex');
+      const actual = createHash("sha256").update(data).digest("hex");
       if (actual === expected) ok++;
-      else { fail++; console.error(`   ❌ ${name}: HASH MISMATCH`); }
+      else {
+        fail++;
+        console.error(`   ❌ ${name}: HASH MISMATCH`);
+      }
     }
   }
 
@@ -391,8 +435,8 @@ async function verify(args: string[]) {
 
 async function shamir(args: string[]) {
   const passphrase = getPassphrase(args);
-  const holdersArg = getArg(args, '--holders');
-  const holders = holdersArg ? holdersArg.split(',') : ['kiro', 'tyto', 'alex'];
+  const holdersArg = getArg(args, "--holders");
+  const holders = holdersArg ? holdersArg.split(",") : ["kiro", "tyto", "alex"];
 
   log(`🔐 Generating Shamir shares (2-of-${holders.length})...\n`);
 
@@ -401,9 +445,11 @@ async function shamir(args: string[]) {
 }
 
 async function shamirRecover(args: string[]) {
-  const hexShares = args.filter(a => !a.startsWith('--'));
+  const hexShares = args.filter((a) => !a.startsWith("--"));
   if (hexShares.length < 2) {
-    console.error('❌ Need at least 2 hex shares. Usage: exuvia shamir-recover <hex1> <hex2>');
+    console.error(
+      "❌ Need at least 2 hex shares. Usage: exuvia shamir-recover <hex1> <hex2>",
+    );
     process.exit(1);
   }
 
@@ -413,27 +459,34 @@ async function shamirRecover(args: string[]) {
   const passphrase = await combineShares(shares);
 
   // F7: Don't print passphrase to terminal scrollback
-  log('   ✅ Passphrase recovered successfully.');
-  log('   Writing to /dev/stdout without newline (pipe-safe)...');
-  log('   Tip: pipe to a file or use: exuvia shamir-recover <s1> <s2> > /tmp/pp.txt\n');
+  log("   ✅ Passphrase recovered successfully.");
+  log("   Writing to /dev/stdout without newline (pipe-safe)...");
+  log(
+    "   Tip: pipe to a file or use: exuvia shamir-recover <s1> <s2> > /tmp/pp.txt\n",
+  );
   process.stdout.write(passphrase);
 }
 
 async function status(args: string[]) {
-  const workspace = getArg(args, '--workspace') || process.env.EXUVIA_WORKSPACE || process.cwd();
+  const workspace =
+    getArg(args, "--workspace") ||
+    process.env.EXUVIA_WORKSPACE ||
+    process.cwd();
   const state = loadState(workspace);
 
   log(`🦞 Exuvia v${VERSION}\n`);
 
   if (!state?.lastBackup) {
-    log('   No backups found. Run `exuvia backup` first.');
+    log("   No backups found. Run `exuvia backup` first.");
     return;
   }
 
   const lb = state.lastBackup;
   log(`   Last backup: ${lb.timestamp}`);
   log(`   Files: ${lb.fileCount}`);
-  log(`   Size: ${(lb.totalSize / 1024).toFixed(1)} KB (plain) / ${(lb.encryptedSize / 1024).toFixed(1)} KB (encrypted)`);
+  log(
+    `   Size: ${(lb.totalSize / 1024).toFixed(1)} KB (plain) / ${(lb.encryptedSize / 1024).toFixed(1)} KB (encrypted)`,
+  );
   log(`   File: ${lb.outputFile}`);
   log(`   Plaintext hash: ${lb.plaintextHash}`);
   log(`   Encrypted hash: ${lb.encryptedHash}`);
@@ -449,19 +502,33 @@ async function status(args: string[]) {
 // --- Main ---
 
 const [command, ...args] = process.argv.slice(2);
-const QUIET = args.includes('--quiet') || args.includes('-q');
-const log = (...a: any[]) => { if (!QUIET) console.log(...a); };
+const QUIET = args.includes("--quiet") || args.includes("-q");
+const log = (...a: any[]) => {
+  if (!QUIET) console.log(...a);
+};
 
 switch (command) {
-  case 'backup': backup(args); break;
-  case 'restore': restore(args); break;
-  case 'verify': verify(args); break;
-  case 'shamir': shamir(args); break;
-  case 'shamir-recover': shamirRecover(args); break;
-  case 'status': status(args); break;
-  case 'version':
-  case '--version':
-  case '-v':
+  case "backup":
+    backup(args);
+    break;
+  case "restore":
+    restore(args);
+    break;
+  case "verify":
+    verify(args);
+    break;
+  case "shamir":
+    shamir(args);
+    break;
+  case "shamir-recover":
+    shamirRecover(args);
+    break;
+  case "status":
+    status(args);
+    break;
+  case "version":
+  case "--version":
+  case "-v":
     log(VERSION);
     break;
   default:
