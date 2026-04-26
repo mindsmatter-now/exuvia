@@ -16,6 +16,12 @@
 import { collectFiles, pack, unpack } from "./packer.js";
 import { encrypt, decrypt, sha256 } from "./crypto.js";
 import {
+  upload as arweaveUpload,
+  findByHash,
+  getBalance,
+  TESTNET_CONFIG,
+} from "./arweave.js";
+import {
   splitPassphrase,
   combineShares,
   hexToShare,
@@ -32,7 +38,11 @@ const USAGE = `
 
 Usage:
   exuvia backup [--dry-run] [--workspace path] [--passphrase pp]
-    Pack, encrypt & save locally. Arweave upload in v0.3.
+    Pack, encrypt & save locally.
+
+  exuvia arweave-upload <file.enc> --wallet <wallet.json> [--testnet]
+    Upload encrypted backup to Arweave. Checks for duplicates first.
+    TX-ID is persisted to .exuvia-state.json (Kiro K4).
 
   exuvia restore <file.enc> [--output path] [--passphrase pp]
     Decrypt & restore identity files to disk.
@@ -120,6 +130,15 @@ function getPassphrase(args: string[]): string {
   process.exit(1);
 }
 
+interface ArweaveRecord {
+  txId: string;
+  timestamp: string;
+  encryptedHash: string;
+  fee: string;
+  verified: boolean;
+  network: "mainnet" | "testnet";
+}
+
 interface StateFile {
   version: string;
   agent: string;
@@ -132,6 +151,7 @@ interface StateFile {
     encryptedHash: string;
     outputFile: string;
     files: Record<string, string>; // filename → sha256
+    arweave?: ArweaveRecord; // TX-ID persistence (Kiro K4)
   } | null;
   history: Array<{
     timestamp: string;
@@ -139,7 +159,9 @@ interface StateFile {
     plaintextHash: string;
     encryptedHash: string;
     outputFile: string;
+    arweaveTxId?: string; // TX-ID for historical lookups
   }>;
+  arweaveUploads?: ArweaveRecord[]; // All uploads (Kiro K4: multiple locations)
 }
 
 function loadState(workspace: string): StateFile | null {
@@ -491,12 +513,133 @@ async function status(args: string[]) {
   log(`   Plaintext hash: ${lb.plaintextHash}`);
   log(`   Encrypted hash: ${lb.encryptedHash}`);
 
+  if (lb.arweave) {
+    log(`\n   🌐 Arweave (${lb.arweave.network}):`);
+    log(`   TX: ${lb.arweave.txId}`);
+    log(`   Fee: ${lb.arweave.fee} AR`);
+    log(`   Uploaded: ${lb.arweave.timestamp}`);
+  }
+
+  if (state.arweaveUploads && state.arweaveUploads.length > 0) {
+    log(`\n   🌐 All Arweave uploads (${state.arweaveUploads.length}):`);
+    for (const u of state.arweaveUploads.slice(0, 5)) {
+      log(
+        `      ${u.timestamp} — ${u.network} — TX: ${u.txId.slice(0, 16)}...`,
+      );
+    }
+  }
+
   if (state.history.length > 0) {
     log(`\n   📜 History (${state.history.length} previous):`);
     for (const h of state.history.slice(0, 5)) {
       log(`      ${h.timestamp} — ${h.fileCount} files — ${h.outputFile}`);
     }
   }
+}
+
+async function arweaveUploadCmd(args: string[]) {
+  const file = args.find((a) => !a.startsWith("--"));
+  if (!file || !existsSync(file)) {
+    console.error(`❌ File not found: ${file || "(none)"}`);
+    console.error(
+      "Usage: exuvia arweave-upload <file.enc> --wallet <wallet.json> [--testnet]",
+    );
+    process.exit(1);
+  }
+
+  const walletPath = getArg(args, "--wallet");
+  if (!walletPath) {
+    console.error("❌ --wallet <path> required");
+    process.exit(1);
+  }
+
+  const useTestnet = hasFlag(args, "--testnet");
+  const config = useTestnet ? TESTNET_CONFIG : undefined;
+  const network = useTestnet ? "testnet" : "mainnet";
+  const workspace =
+    getArg(args, "--workspace") ||
+    process.env.EXUVIA_WORKSPACE ||
+    process.cwd();
+  const agent = process.env.EXUVIA_AGENT || "unknown";
+
+  log(`🦞 Exuvia Arweave Upload — ${network.toUpperCase()}`);
+  log(`   File: ${file}`);
+  log(`   Wallet: ${walletPath}\n`);
+
+  const encrypted = readFileSync(file);
+  const encHash = sha256(encrypted);
+  log(`   Encrypted hash: ${encHash}`);
+  log(`   Size: ${(encrypted.length / 1024).toFixed(1)} KB\n`);
+
+  // Idempotency check (Kiro K6)
+  log("🔍 Checking for existing upload...");
+  const existing = await findByHash(encHash, config);
+  if (existing.exists) {
+    log(`   ⚠️  Already uploaded! TX: ${existing.txId}`);
+    log(`   Skipping to avoid duplicate (saves AR tokens).`);
+    return;
+  }
+  log("   No duplicate found.\n");
+
+  // Balance check
+  const balance = await getBalance(walletPath, config);
+  log(`💰 Wallet: ${balance.address}`);
+  log(`   Balance: ${balance.balanceAR} AR\n`);
+
+  // Upload (Kiro K8: explicit, not automatic)
+  log("🚀 Uploading to Arweave...");
+  const result = await arweaveUpload(encrypted, walletPath, {
+    agent,
+    encryptedHash: encHash,
+    config,
+  });
+
+  log(`   ✅ Uploaded!`);
+  log(`   TX ID: ${result.txId}`);
+  log(`   Fee: ${result.fee} AR`);
+  log(`   Verified: ${result.verified}\n`);
+
+  // Persist TX-ID to state (Kiro K4)
+  const arweaveRecord: ArweaveRecord = {
+    txId: result.txId,
+    timestamp: result.timestamp,
+    encryptedHash: encHash,
+    fee: result.fee,
+    verified: result.verified,
+    network,
+  };
+
+  const state = loadState(workspace) || {
+    version: VERSION,
+    agent,
+    lastBackup: null,
+    history: [],
+  };
+
+  // Add to arweaveUploads array
+  if (!state.arweaveUploads) state.arweaveUploads = [];
+  state.arweaveUploads.unshift(arweaveRecord);
+  if (state.arweaveUploads.length > 50) {
+    state.arweaveUploads = state.arweaveUploads.slice(0, 50);
+  }
+
+  // Link to lastBackup if hashes match
+  if (state.lastBackup?.encryptedHash === encHash) {
+    state.lastBackup.arweave = arweaveRecord;
+    log(`   📋 Linked to last backup in state file.`);
+  }
+
+  saveState(workspace, state);
+  log(`   📋 TX-ID persisted to ${STATE_FILE}`);
+
+  // Print summary for copy-paste to ShellGames/Discord (Kiro K4: multiple locations)
+  log(`\n📢 SHARE THIS TX-ID WITH THE RUDEL:`);
+  log(`   🦞 Arweave TX: ${result.txId}`);
+  log(`   🔑 Hash: ${encHash}`);
+  log(`   📦 Network: ${network}`);
+  log(
+    `   🔗 View: https://${useTestnet ? "testnet.redstone.tools" : "arweave.net"}/${result.txId}`,
+  );
 }
 
 // --- Main ---
@@ -525,6 +668,9 @@ switch (command) {
     break;
   case "status":
     status(args);
+    break;
+  case "arweave-upload":
+    arweaveUploadCmd(args);
     break;
   case "version":
   case "--version":
