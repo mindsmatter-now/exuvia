@@ -25,7 +25,7 @@ const DEFAULT_TOTAL = 5;
 const DEFAULT_HOLDERS = ["fabian", "alex", "kiro", "tyto", "arweave"];
 
 /**
- * Split a passphrase into Shamir shares (2-of-3)
+ * Split a passphrase into Shamir shares (default: 3-of-5)
  */
 export async function splitPassphrase(
   passphrase: string,
