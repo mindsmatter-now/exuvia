@@ -1,0 +1,1 @@
+{"root":["./src/arweave.ts","./src/cli.ts","./src/crypto.test.ts","./src/crypto.ts","./src/index.ts","./src/integration.test.ts","./src/packer.test.ts","./src/packer.ts","./src/shamir.test.ts","./src/shamir.ts"],"version":"5.9.3"}

@@ -1,10 +1,14 @@
 /**
  * Exuvia Shamir Module
  *
- * 2-of-3 Shamir Secret Sharing for passphrase recovery.
+ * 3-of-5 Shamir Secret Sharing for passphrase recovery.
+ * "Horcruxe der Liebe" — approved by Fabian 26.04.2026
  * Library: shamir-secret-sharing (Privy.io, audited, zero-dep, GF(2^8))
  *
- * Approved by Kiro 🐺, architecture by Tyto 🦉
+ * Holders: Fabian(DE), Alex(DE/USB), Kiro(FI), Tyto(US), Arweave(on-chain)
+ * Any 3 shares reconstruct the passphrase. Each alone is useless.
+ *
+ * Security review: Kiro 🐺, architecture: Tyto 🦉
  */
 
 import { split, combine } from "shamir-secret-sharing";
@@ -16,9 +20,9 @@ export interface ShamirShares {
   holders: string[];
 }
 
-const DEFAULT_THRESHOLD = 2;
-const DEFAULT_TOTAL = 3;
-const DEFAULT_HOLDERS = ["kiro", "tyto", "alex"];
+const DEFAULT_THRESHOLD = 3;
+const DEFAULT_TOTAL = 5;
+const DEFAULT_HOLDERS = ["fabian", "alex", "kiro", "tyto", "arweave"];
 
 /**
  * Split a passphrase into Shamir shares (2-of-3)

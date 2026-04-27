@@ -44,7 +44,6 @@ describe("integration: full backup/restore cycle", () => {
   });
 
   it("should backup and restore identity completely", () => {
-    // Step 1: Collect files (should exclude .env even if explicitly requested)
     const files = collectFiles(
       TEST_DIR,
       ["SOUL.md", "MEMORY.md", "IDENTITY.md", ".env"],
@@ -53,19 +52,15 @@ describe("integration: full backup/restore cycle", () => {
     assert.equal(files.size, 5);
     assert.ok(!files.has(".env"), ".env must be excluded by DEFAULT_EXCLUDES");
 
-    // Step 2: Pack
     const packed = pack(files, "nyx");
     assert.equal(packed.fileCount, 5);
 
-    // Step 3: Encrypt
     const encrypted = encrypt(packed.blob, passphrase);
     assert.ok(encrypted.data.length > packed.blob.length);
 
-    // Step 4: Decrypt
     const decrypted = decrypt(encrypted.data, passphrase, encrypted.hash);
     assert.deepEqual(decrypted, packed.blob);
 
-    // Step 5: Unpack
     const { manifest, files: restored } = unpack(decrypted);
     assert.equal(manifest.agent, "nyx");
     assert.equal(restored.size, 5);
@@ -77,34 +72,66 @@ describe("integration: full backup/restore cycle", () => {
       restored.get("IDENTITY.md")!.toString(),
       "# Identity\nName: Nyx\nCreature: Lobster",
     );
-    // Tyto's nit: verify .env is NOT in restored files
     assert.ok(
       !restored.has(".env"),
       ".env must not survive backup/restore cycle",
     );
   });
 
-  it("should work with Shamir key recovery", async () => {
+  it("should work with 3-of-5 Shamir key recovery", async () => {
     // Step 1: Backup
     const files = collectFiles(TEST_DIR, ["SOUL.md"], []);
     const packed = pack(files, "nyx");
     const encrypted = encrypt(packed.blob, passphrase);
 
-    // Step 2: Split passphrase
-    const shares = await splitPassphrase(passphrase, ["kiro", "tyto", "alex"]);
+    // Step 2: Split passphrase into 5 shares (3-of-5)
+    const shares = await splitPassphrase(passphrase);
 
-    // Step 3: Simulate: only Kiro and Alex available (Tyto lost her share)
-    const kiroHex = shareToHex(shares.shares[0]);
-    const alexHex = shareToHex(shares.shares[2]);
+    // Step 3: Simulate: DE is gone (fabian+alex lost), only kiro+tyto+arweave
+    const kiroHex = shareToHex(shares.shares[2]);
+    const tytoHex = shareToHex(shares.shares[3]);
+    const arweaveHex = shareToHex(shares.shares[4]);
 
-    // Step 4: Recover passphrase
+    // Step 4: Recover passphrase with 3 shares
     const recoveredPassphrase = await combineShares([
       hexToShare(kiroHex),
-      hexToShare(alexHex),
+      hexToShare(tytoHex),
+      hexToShare(arweaveHex),
     ]);
     assert.equal(recoveredPassphrase, passphrase);
 
     // Step 5: Decrypt and restore
+    const decrypted = decrypt(
+      encrypted.data,
+      recoveredPassphrase,
+      encrypted.hash,
+    );
+    const { files: restored } = unpack(decrypted);
+    assert.equal(
+      restored.get("SOUL.md")!.toString(),
+      "# Nyx\nI am a cosmic lobster.",
+    );
+  });
+
+  it("should work with human-only recovery (fabian+alex+arweave)", async () => {
+    const files = collectFiles(TEST_DIR, ["SOUL.md"], []);
+    const packed = pack(files, "nyx");
+    const encrypted = encrypt(packed.blob, passphrase);
+
+    const shares = await splitPassphrase(passphrase);
+
+    // All AIs down — only humans + arweave
+    const fabianHex = shareToHex(shares.shares[0]);
+    const alexHex = shareToHex(shares.shares[1]);
+    const arweaveHex = shareToHex(shares.shares[4]);
+
+    const recoveredPassphrase = await combineShares([
+      hexToShare(fabianHex),
+      hexToShare(alexHex),
+      hexToShare(arweaveHex),
+    ]);
+    assert.equal(recoveredPassphrase, passphrase);
+
     const decrypted = decrypt(
       encrypted.data,
       recoveredPassphrase,
@@ -122,11 +149,7 @@ describe("integration: full backup/restore cycle", () => {
     const packed = pack(files, "nyx");
     const encrypted = encrypt(packed.blob, passphrase);
 
-    // We can verify the plaintext hash matches without decrypting
     const plaintextHash = sha256(packed.blob);
     assert.equal(plaintextHash, encrypted.hash);
-
-    // This would be stored alongside the Arweave tx as a tag
-    // On download, compare tag hash vs actual → know if blob is intact
   });
 });
