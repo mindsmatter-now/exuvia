@@ -40,7 +40,7 @@ describe("DMS — signPing", () => {
 });
 
 describe("DMS — hashAgentId", () => {
-  it("should return 16-char hex", () => {
+  it("should return 32-char hex", () => {
     const hash = hashAgentId("nyx");
     assert.equal(hash.length, 32);
     assert.match(hash, /^[0-9a-f]{32}$/);
