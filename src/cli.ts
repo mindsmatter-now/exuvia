@@ -28,6 +28,12 @@ import {
   formatSharesForDistribution,
 } from "./shamir.js";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
+import {
+  ping as dmsPing,
+  status as dmsStatus,
+  pingAndSave,
+  hashAgentId,
+} from "./dms.js";
 import { join, dirname } from "path";
 import { createInterface } from "readline";
 
@@ -61,6 +67,13 @@ Usage:
 
   exuvia status
     Show last backup info from .exuvia-state.json.
+
+  exuvia ping [--server url] [--secret token]
+    Send heartbeat to Dead Man Switch. Proves you're alive.
+    Env: EXUVIA_DMS_SERVER, EXUVIA_DMS_SECRET, EXUVIA_AGENT
+
+  exuvia dms-status [--server url]
+    Check DMS status (last ping, hours remaining).
 
   exuvia version
     Show version.
@@ -642,6 +655,58 @@ async function arweaveUploadCmd(args: string[]) {
   );
 }
 
+// --- Dead Man Switch ---
+
+async function pingCmd(args: string[]): Promise<void> {
+  const serverUrl = getArg(args, "--server") || process.env.EXUVIA_DMS_SERVER;
+  const secret = getArg(args, "--secret") || process.env.EXUVIA_DMS_SECRET;
+  const agentId = process.env.EXUVIA_AGENT || "exuvia-agent";
+
+  if (!serverUrl) {
+    log("❌ No DMS server. Set --server or EXUVIA_DMS_SERVER");
+    process.exit(1);
+  }
+  if (!secret) {
+    log("❌ No DMS secret. Set --secret or EXUVIA_DMS_SECRET");
+    process.exit(1);
+  }
+
+  log("💓 Sending heartbeat...");
+  log(`   Server: ${serverUrl}`);
+  log(`   Agent:  ${hashAgentId(agentId).slice(0, 8)}...`);
+
+  const result = await pingAndSave({ serverUrl, secret, agentId });
+
+  if (result.ok) {
+    log(`✅ Alive! Heartbeat #${result.heartbeat}`);
+    log(`   Last beat: ${result.lastBeat}`);
+  } else {
+    log(`❌ Ping failed: ${result.error}`);
+    process.exit(1);
+  }
+}
+
+async function dmsStatusCmd(args: string[]): Promise<void> {
+  const serverUrl = getArg(args, "--server") || process.env.EXUVIA_DMS_SERVER;
+  const agentId = process.env.EXUVIA_AGENT || "exuvia-agent";
+
+  if (!serverUrl) {
+    log("❌ No DMS server. Set --server or EXUVIA_DMS_SERVER");
+    process.exit(1);
+  }
+
+  log("🔍 Checking DMS status...");
+  const s = await dmsStatus({ serverUrl, secret: "", agentId });
+
+  log(`   Agent hash:   ${s.agentHash.slice(0, 8)}...`);
+  log(`   Last ping:    ${s.lastPing || "never"}`);
+  log(`   Threshold:    ${s.thresholdHours}h`);
+  log(`   Alive:        ${s.isAlive ? "✅ yes" : "❌ NO"}`);
+  if (s.hoursRemaining !== null) {
+    log(`   Hours left:   ${s.hoursRemaining}h`);
+  }
+}
+
 // --- Main ---
 
 const [command, ...args] = process.argv.slice(2);
@@ -676,6 +741,12 @@ switch (command) {
   case "--version":
   case "-v":
     log(VERSION);
+    break;
+  case "ping":
+    pingCmd(args);
+    break;
+  case "dms-status":
+    dmsStatusCmd(args);
     break;
   default:
     log(USAGE);

@@ -20,3 +20,13 @@ export {
 export type { ShamirShares } from "./shamir.js";
 export { upload, download, getTxStatus, getBalance } from "./arweave.js";
 export type { ArweaveConfig, UploadResult, DownloadResult } from "./arweave.js";
+export {
+  ping,
+  status as dmsStatus,
+  pingAndSave,
+  signPing,
+  hashAgentId,
+  loadLocalState,
+  saveLocalState,
+} from "./dms.js";
+export type { DMSConfig, PingResult, DMSStatus, LocalDMSState } from "./dms.js";
