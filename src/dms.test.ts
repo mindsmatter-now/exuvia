@@ -42,8 +42,8 @@ describe("DMS — signPing", () => {
 describe("DMS — hashAgentId", () => {
   it("should return 16-char hex", () => {
     const hash = hashAgentId("nyx");
-    assert.equal(hash.length, 16);
-    assert.match(hash, /^[0-9a-f]{16}$/);
+    assert.equal(hash.length, 32);
+    assert.match(hash, /^[0-9a-f]{32}$/);
   });
 
   it("should be deterministic", () => {

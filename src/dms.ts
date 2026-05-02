@@ -57,7 +57,7 @@ export function hashAgentId(agentId: string): string {
   return createHmac("sha256", "exuvia-dms-v1")
     .update(agentId)
     .digest("hex")
-    .slice(0, 16);
+    .slice(0, 32);
 }
 
 /**
