@@ -65,7 +65,6 @@ export function hashAgentId(agentId: string): string {
  */
 export async function ping(config: DMSConfig): Promise<PingResult> {
   const timestamp = Date.now();
-  const signature = signPing(config.agentId, timestamp, config.secret);
 
   try {
     const response = await fetch(`${config.serverUrl}/heartbeat`, {
@@ -77,7 +76,6 @@ export async function ping(config: DMSConfig): Promise<PingResult> {
       body: JSON.stringify({
         source: hashAgentId(config.agentId),
         timestamp,
-        signature,
       }),
       signal: AbortSignal.timeout(10000),
     });
@@ -117,27 +115,17 @@ export async function status(config: DMSConfig): Promise<DMSStatus> {
     }
 
     const data = (await response.json()) as Record<string, unknown>;
-    const agents = data.agents as Record<string, unknown>[] | undefined;
     const agentHash = hashAgentId(config.agentId);
     const thresholdHours = config.thresholdHours ?? 72;
 
-    const agent = agents?.find(
-      (a: Record<string, unknown>) => a.id === agentHash,
-    );
-
-    if (!agent) {
-      return {
-        agentHash,
-        lastPing: null,
-        thresholdHours,
-        isAlive: false,
-        hoursRemaining: null,
-      };
-    }
-
-    const lastPing = agent.lastBeat as string;
+    // Kiro's DMS returns flat object: { status, lastHeartbeat, hoursSinceLastBeat, ... }
+    // Future multi-agent DMS may return agents array
+    const lastPing = (data.lastHeartbeat as string) ?? null;
     const hoursSince =
-      (Date.now() - new Date(lastPing).getTime()) / (1000 * 60 * 60);
+      (data.hoursSinceLastBeat as number) ??
+      (lastPing
+        ? (Date.now() - new Date(lastPing).getTime()) / (1000 * 60 * 60)
+        : Infinity);
     const hoursRemaining = Math.max(0, thresholdHours - hoursSince);
 
     return {
@@ -145,7 +133,7 @@ export async function status(config: DMSConfig): Promise<DMSStatus> {
       lastPing,
       thresholdHours,
       isAlive: hoursSince < thresholdHours,
-      hoursRemaining: Math.round(hoursRemaining * 10) / 10,
+      hoursRemaining: lastPing ? Math.round(hoursRemaining * 10) / 10 : null,
     };
   } catch {
     return {
