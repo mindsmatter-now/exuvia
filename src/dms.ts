@@ -65,6 +65,8 @@ export function hashAgentId(agentId: string): string {
  */
 export async function ping(config: DMSConfig): Promise<PingResult> {
   const timestamp = Date.now();
+  const agentHash = hashAgentId(config.agentId);
+  const signature = signPing(config.agentId, timestamp, config.secret);
 
   try {
     const response = await fetch(`${config.serverUrl}/heartbeat`, {
@@ -74,8 +76,9 @@ export async function ping(config: DMSConfig): Promise<PingResult> {
         Authorization: `Bearer ${config.secret}`,
       },
       body: JSON.stringify({
-        source: hashAgentId(config.agentId),
+        source: agentHash,
         timestamp,
+        signature,
       }),
       signal: AbortSignal.timeout(10000),
     });
