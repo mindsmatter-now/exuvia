@@ -6,3 +6,6 @@ dist/
 .exuvia.json
 .exuvia-state.json
 arweave-wallet.json
+dms-server/node_modules/
+dms-server/dist/
+dms-server/*.db
