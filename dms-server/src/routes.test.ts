@@ -226,6 +226,43 @@ describe("DMS Server Routes", () => {
         body: {},
       });
     });
+
+    it("F1: snoozed agent should NOT be marked expired", async () => {
+      const db = getDb();
+
+      // Clear any existing snoozes from previous tests
+      db.prepare("DELETE FROM snoozes WHERE agent_id = ?").run(TEST_AGENT_ID);
+
+      // Set last_ping to far in the past (beyond threshold)
+      const oldDate = new Date(Date.now() - 100 * 60 * 60 * 1000).toISOString(); // 100h ago
+      db.prepare(
+        "UPDATE agents SET last_ping = ?, status = 'active' WHERE id = ?",
+      ).run(oldDate, TEST_AGENT_ID);
+
+      // Without snooze, should be expired
+      const r1 = await request("GET", `/status/${TEST_AGENT_ID}`);
+      assert.equal(r1.json.status, "expired");
+
+      // Now snooze and reset status
+      db.prepare("UPDATE agents SET status = 'snoozed' WHERE id = ?").run(
+        TEST_AGENT_ID,
+      );
+      await request("POST", "/snooze", {
+        auth: TEST_SECRET,
+        body: { hours: 48 },
+      });
+
+      // With active snooze, should stay snoozed even though lastPing > threshold
+      const r2 = await request("GET", `/status/${TEST_AGENT_ID}`);
+      assert.equal(r2.json.status, "snoozed");
+      assert.ok(r2.json.snoozedUntil);
+
+      // Reset for other tests
+      await request("POST", "/ping", {
+        auth: TEST_SECRET,
+        body: {},
+      });
+    });
   });
 });
 
