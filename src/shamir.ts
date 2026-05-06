@@ -58,6 +58,9 @@ export async function splitPassphrase(
 export async function combineShares(shares: Uint8Array[]): Promise<string> {
   if (shares.length < 2) {
     throw new Error("Need at least 2 shares to reconstruct");
+    // NOTE: With threshold=3, providing exactly 2 shares will return garbage
+    // data rather than throwing an error — this is by design in GF(2^8) Shamir.
+    // The caller must ensure they have enough shares. Tests verify this explicitly.
   }
 
   const secret = await combine(shares);

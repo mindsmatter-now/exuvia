@@ -20,6 +20,8 @@ app.post("/ping", async (c) => {
 
   const db = getDb();
   const now = new Date().toISOString();
+  // NOTE: Requires reverse proxy (Caddy/nginx) to set x-forwarded-for.
+  // Without a proxy, this returns the proxy IP, not the client IP.
   const ip = c.req.header("x-forwarded-for") || "unknown";
   const body = await c.req.json().catch(() => ({}));
 
