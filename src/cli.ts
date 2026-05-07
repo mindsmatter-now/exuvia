@@ -17,8 +17,10 @@ import { collectFiles, pack, unpack } from "./packer.js";
 import { encrypt, decrypt, sha256 } from "./crypto.js";
 import {
   upload as arweaveUpload,
+  uploadViaTurbo,
   findByHash,
   getBalance,
+  getTurboBalance,
   TESTNET_CONFIG,
 } from "./arweave.js";
 import {
@@ -46,8 +48,9 @@ Usage:
   exuvia backup [--dry-run] [--workspace path] [--passphrase pp]
     Pack, encrypt & save locally.
 
-  exuvia arweave-upload <file.enc> --wallet <wallet.json> [--testnet]
+  exuvia arweave-upload <file.enc> --wallet <wallet.json> [--testnet] [--turbo]
     Upload encrypted backup to Arweave. Checks for duplicates first.
+    --turbo  Use ArDrive Turbo (Credits) instead of native AR tokens.
     TX-ID is persisted to .exuvia-state.json (Kiro K4).
 
   exuvia restore <file.enc> [--output path] [--passphrase pp]
@@ -567,6 +570,7 @@ async function arweaveUploadCmd(args: string[]) {
   }
 
   const useTestnet = hasFlag(args, "--testnet");
+  const useTurbo = hasFlag(args, "--turbo");
   const config = useTestnet ? TESTNET_CONFIG : undefined;
   const network = useTestnet ? "testnet" : "mainnet";
   const workspace =
@@ -575,7 +579,8 @@ async function arweaveUploadCmd(args: string[]) {
     process.cwd();
   const agent = process.env.EXUVIA_AGENT || "unknown";
 
-  log(`🦞 Exuvia Arweave Upload — ${network.toUpperCase()}`);
+  const method = useTurbo ? "Turbo" : "Native";
+  log(`🦞 Exuvia Arweave Upload — ${network.toUpperCase()} (${method})`);
   log(`   File: ${file}`);
   log(`   Wallet: ${walletPath}\n`);
 
@@ -595,17 +600,27 @@ async function arweaveUploadCmd(args: string[]) {
   log("   No duplicate found.\n");
 
   // Balance check
-  const balance = await getBalance(walletPath, config);
-  log(`💰 Wallet: ${balance.address}`);
-  log(`   Balance: ${balance.balanceAR} AR\n`);
+  if (useTurbo) {
+    const turboBalance = await getTurboBalance(walletPath);
+    log(`💰 Turbo Credits: ${turboBalance.credits} winc\n`);
+  } else {
+    const balance = await getBalance(walletPath, config);
+    log(`💰 Wallet: ${balance.address}`);
+    log(`   Balance: ${balance.balanceAR} AR\n`);
+  }
 
   // Upload (Kiro K8: explicit, not automatic)
-  log("🚀 Uploading to Arweave...");
-  const result = await arweaveUpload(encrypted, walletPath, {
-    agent,
-    encryptedHash: encHash,
-    config,
-  });
+  log(`🚀 Uploading to Arweave via ${method}...`);
+  const result = useTurbo
+    ? await uploadViaTurbo(encrypted, walletPath, {
+        agent,
+        encryptedHash: encHash,
+      })
+    : await arweaveUpload(encrypted, walletPath, {
+        agent,
+        encryptedHash: encHash,
+        config,
+      });
 
   log(`   ✅ Uploaded!`);
   log(`   TX ID: ${result.txId}`);

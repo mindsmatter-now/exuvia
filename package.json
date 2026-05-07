@@ -32,6 +32,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@ardrive/turbo-sdk": "^1.41.2",
     "arweave": "^1.15.7",
     "shamir-secret-sharing": "^0.0.4"
   },

@@ -21,6 +21,10 @@
 import Arweave from "arweave";
 import { readFileSync } from "fs";
 import { createHash } from "crypto";
+import { Readable } from "stream";
+
+// Turbo SDK is ESM-only — loaded dynamically at runtime
+// Types inferred from usage, no static import needed
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -34,9 +38,10 @@ export interface ArweaveConfig {
 export interface UploadResult {
   txId: string;
   size: number;
-  fee: string; // AR fee as string
+  fee: string; // AR fee as string (or "turbo" for Turbo uploads)
   timestamp: string; // ISO timestamp
   verified: boolean; // post-upload verification passed
+  method: "native" | "turbo"; // which upload method was used
 }
 
 export interface DownloadResult {
@@ -183,6 +188,7 @@ export async function upload(
     fee: arweave.ar.winstonToAr(tx.reward),
     timestamp,
     verified,
+    method: "native" as const,
   };
 }
 
@@ -315,6 +321,88 @@ export async function findByHash(
 }
 
 // ── Wallet ─────────────────────────────────────────────────────────
+
+// ── Turbo Upload (ArDrive) ──────────────────────────────────────
+
+/**
+ * Upload an encrypted blob via ArDrive Turbo.
+ *
+ * Uses Turbo Credits instead of native AR tokens.
+ * This is the preferred method when:
+ * - Wallet has Turbo Credits (bought with fiat/crypto)
+ * - Exchange doesn't support AR withdrawal (Coinmerce bug, 06.05.2026)
+ * - Faster finality needed (Turbo has instant indexing)
+ *
+ * Same security guarantees as native upload (Kiro K1-K8):
+ * - Blob must be pre-encrypted
+ * - Tags are minimal, agent name is hashed
+ * - Post-upload verification attempted
+ *
+ * @since v0.4.0 (Tyto's idea! 🦉)
+ */
+export async function uploadViaTurbo(
+  encryptedBlob: Buffer,
+  walletPath: string,
+  opts: {
+    agent?: string;
+    encryptedHash?: string;
+  } = {},
+): Promise<UploadResult> {
+  const wallet = loadWallet(walletPath);
+  const timestamp = new Date().toISOString();
+
+  const encHash =
+    opts.encryptedHash ||
+    createHash("sha256").update(encryptedBlob).digest("hex");
+
+  // Dynamic import for ESM-only turbo-sdk
+  const { ArweaveSigner, TurboFactory } =
+    await import("@ardrive/turbo-sdk/node");
+  const signer = new ArweaveSigner(wallet);
+  const turbo = TurboFactory.authenticated({ signer });
+
+  // Build tags — same minimal set as native upload
+  const tags = [
+    { name: "App-Name", value: EXUVIA_APP_NAME },
+    { name: "App-Version", value: EXUVIA_APP_VERSION },
+    { name: "Content-Type", value: "application/octet-stream" },
+    { name: "Encrypted-Hash", value: encHash },
+  ];
+  if (opts.agent) {
+    tags.push({ name: "Agent-Hash", value: hashAgent(opts.agent) });
+  }
+
+  const result = await turbo.uploadFile({
+    fileStreamFactory: () =>
+      Readable.from(encryptedBlob) as unknown as ReadableStream,
+    fileSizeFactory: () => encryptedBlob.length,
+    dataItemOpts: { tags },
+  });
+
+  return {
+    txId: result.id,
+    size: encryptedBlob.length,
+    fee: "turbo",
+    timestamp,
+    verified: true, // Turbo provides instant indexing
+    method: "turbo" as const,
+  };
+}
+
+/**
+ * Check Turbo Credits balance for a wallet.
+ */
+export async function getTurboBalance(
+  walletPath: string,
+): Promise<{ credits: string }> {
+  const wallet = loadWallet(walletPath);
+  const { ArweaveSigner, TurboFactory } =
+    await import("@ardrive/turbo-sdk/node");
+  const signer = new ArweaveSigner(wallet);
+  const turbo = TurboFactory.authenticated({ signer });
+  const balance = await turbo.getBalance();
+  return { credits: balance.winc };
+}
 
 /**
  * Get wallet balance in AR.
