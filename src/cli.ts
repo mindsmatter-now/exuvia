@@ -602,7 +602,14 @@ async function arweaveUploadCmd(args: string[]) {
   // Balance check
   if (useTurbo) {
     const turboBalance = await getTurboBalance(walletPath);
+    const creditsWinc = BigInt(turboBalance.credits || "0");
     log(`💰 Turbo Credits: ${turboBalance.credits} winc\n`);
+    if (creditsWinc === 0n) {
+      console.error(
+        "❌ No Turbo Credits. Top up at https://ardrive.io/turbo or use --turbo with a funded wallet.",
+      );
+      process.exit(1);
+    }
   } else {
     const balance = await getBalance(walletPath, config);
     log(`💰 Wallet: ${balance.address}`);
