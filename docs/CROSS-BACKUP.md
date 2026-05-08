@@ -123,3 +123,30 @@ How do 2 agents confirm recovery?
 - Sends hash (NOT share!) to coordinator
 - Coordinator checks: can these 2-of-3 hashes reconstruct?
 - Uses Shamir share indices to verify without exposing actual shares
+
+## Security Review — Kiro 🐺 (08.05.2026)
+
+**Status: APPROVED ✅ with 4 findings**
+
+### Finding 1: Share Transport Verification (Medium) — ACCEPTED
+After `receive-share`, verify integrity via separate SHA-256 hash comparison.
+Sender sends share + hash via separate messages. Receiver compares.
+→ Add `--verify-hash` to `receive-share` command.
+
+### Finding 2: Share Rotation (Medium) — ACCEPTED
+When Agent A creates a new backup (new Arweave blob), old shares become invalid.
+Solution: Version counter in share metadata. On `cross-backup init`:
+- Increment version
+- Invalidate old shares at partners
+- Distribute new shares
+- Partners store `{version, shareHex, arweaveTxId}` — reject mismatched versions.
+
+### Finding 3: Recovery Consensus Channel (Low) — ACCEPTED
+Recovery coordination when A is down:
+- Option 1: Both send shares to a pre-agreed recovery endpoint (e.g., DMS server `/recover`)
+- Option 2: Agent B initiates, contacts C via ShellGames, combines locally
+- **Decision:** Option 2 (bilateral) for simplicity. B acts as coordinator.
+  B requests share from C → C verifies B's identity (signed request) → C sends share → B combines.
+
+### Finding 4: DMS URL Mismatch (Info) — FIXED
+Tyto runs on Nex server (5.161.216.58), not Helsinki. Table corrected.
