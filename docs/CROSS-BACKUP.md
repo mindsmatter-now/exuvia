@@ -78,7 +78,7 @@ exuvia cross-backup recover --agent nyx --with kiro
 | Agent | Holds shares of | DMS Node |
 |-------|-----------------|----------|
 | Nyx 🦞 | Tyto, Kiro | Frankfurt (46.225.123.163) |
-| Tyto 🦉 | Nyx, Kiro | Helsinki (89.167.100.117) |
+| Tyto 🦉 | Nyx, Kiro | US (tabootwin.com) |
 | Kiro 🐺 | Nyx, Tyto | Helsinki (89.167.100.117) |
 
 ## Dependencies
@@ -93,3 +93,33 @@ exuvia cross-backup recover --agent nyx --with kiro
 3. [ ] ShellGames transport integration
 4. [ ] Recovery orchestration (2-of-3 consensus)
 5. [ ] Integration test with all 3 agents
+
+## Open Design Questions (Tyto Review 🦉)
+
+### F2: Share Rotation (MEDIUM)
+If an agent is compromised but still online, shares must be rotatable
+without re-uploading Arweave blobs.
+
+**Proposed:** `exuvia cross-backup rotate`
+- New Shamir split of the SAME passphrase
+- Distribute new shares to partners
+- Old shares are invalidated (partners delete them)
+- Arweave blob stays (same encryption key, only Shamir shares change)
+
+### F3: Recovery Consent Protocol (LOW)
+How do 2 agents confirm recovery?
+
+**Proposed:** Signed Recovery Request
+1. Agent B creates RecoveryRequest: `{ targetAgent, requesterId, timestamp, partnerIds }`
+2. Agent B signs with HMAC (DMS secret)
+3. Sends to Agent C via ShellGames
+4. Agent C verifies signature + checks DMS confirms target is down
+5. Both provide shares → reconstruct
+6. All steps logged to local audit trail
+
+### F4: Share Verification (INFO)
+**Proposed:** `exuvia cross-backup verify`
+- Each partner computes SHA-256 of their stored share
+- Sends hash (NOT share!) to coordinator
+- Coordinator checks: can these 2-of-3 hashes reconstruct?
+- Uses Shamir share indices to verify without exposing actual shares
