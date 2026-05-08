@@ -30,3 +30,18 @@ export {
   saveLocalState,
 } from "./dms.js";
 export type { DMSConfig, PingResult, DMSStatus, LocalDMSState } from "./dms.js";
+export {
+  init as crossBackupInit,
+  receiveShare,
+  verifyShare,
+  status as crossBackupStatus,
+  encryptShare,
+  decryptShare,
+  hashShare,
+} from "./cross-backup.js";
+export type {
+  CrossBackupState,
+  CrossBackupStatus,
+  Partner,
+  InitResult,
+} from "./cross-backup.js";
