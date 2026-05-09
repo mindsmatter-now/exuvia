@@ -363,7 +363,6 @@ export interface RecoverResult {
   agentId: string;
   passphrase: string;
   sharesUsed: number;
-  threshold: number;
 }
 
 /**
@@ -425,7 +424,6 @@ export async function recover(
     agentId,
     passphrase,
     sharesUsed: allShareHexes.length,
-    threshold: allShareHexes.length, // we used exactly this many
   };
 }
 
