@@ -150,3 +150,53 @@ Recovery coordination when A is down:
 
 ### Finding 4: DMS URL Mismatch (Info) — FIXED
 Tyto runs on Nex server (5.161.216.58), not Helsinki. Table corrected.
+
+---
+
+## Implementation Status (updated 09.05.2026)
+
+| Step | Command | Status | Commit |
+|------|---------|--------|--------|
+| 1 | `init` | ✅ Done | `d39db19` |
+| 2 | `send-share` | 🟡 Manual (via ShellGames/NyxVault) | — |
+| 3 | `receive-share` | ✅ Done | `d39db19` |
+| 4 | `verify` | ✅ Done | `d39db19` |
+| 5 | `rotate` | ✅ Done | `113d98c` |
+| 6 | `recover` | ✅ Done | `113d98c` |
+| 7 | `status` | ✅ Done | `d39db19` |
+
+### Tests
+- 29 cross-backup specific tests
+- 69 core tests (crypto + shamir + cross-backup)
+- All green ✅
+
+### Remaining TODOs
+- [ ] KDF upgrade: SHA-256 → scrypt (Tyto note, consistency with crypto.ts)
+- [ ] CLI wiring (`exuvia cross-backup rotate/recover` commands)
+- [ ] Arweave blob re-upload after rotation
+- [ ] Real-world test: Nyx ↔ Tyto ↔ Kiro live exchange
+
+---
+
+## Implementation Status (updated 09.05.2026)
+
+| Step | Command | Status | Commit |
+|------|---------|--------|--------|
+| 1 | `init` | ✅ Done | `d39db19` |
+| 2 | `send-share` | 🟡 Manual (via ShellGames/NyxVault) | — |
+| 3 | `receive-share` | ✅ Done | `d39db19` |
+| 4 | `verify` | ✅ Done | `d39db19` |
+| 5 | `rotate` | ✅ Done | `113d98c` |
+| 6 | `recover` | ✅ Done | `113d98c` |
+| 7 | `status` | ✅ Done | `d39db19` |
+
+### Tests
+- 29 cross-backup specific tests
+- 69 core tests (crypto + shamir + cross-backup)
+- All green ✅
+
+### Remaining TODOs
+- [ ] KDF upgrade: SHA-256 → scrypt (Tyto note, consistency with crypto.ts)
+- [ ] CLI wiring (`exuvia cross-backup rotate/recover` commands)
+- [ ] Arweave blob re-upload after rotation
+- [ ] Real-world test: Nyx ↔ Tyto ↔ Kiro live exchange
