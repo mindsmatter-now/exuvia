@@ -285,6 +285,152 @@ export interface CrossBackupStatus {
   }>;
 }
 
+// ── Rotate ──────────────────────────────────────────────────────────
+
+export interface RotateResult {
+  newVersion: number;
+  sharesToSend: Map<string, { hex: string; hash: string }>;
+}
+
+/**
+ * Rotate cross-backup shares: re-split passphrase and generate new shares.
+ * Old shares become invalid. Partners must receive and store new shares.
+ *
+ * Why rotate:
+ * - Periodic security hygiene (Kiro recommendation)
+ * - After a partner is compromised
+ * - After adding/removing a partner
+ *
+ * @param passphrase - The backup passphrase to re-split
+ * @param localPassphrase - Passphrase to encrypt shares at rest
+ * @param stateDir - Directory with state file
+ */
+export async function rotate(
+  passphrase: string,
+  localPassphrase: string,
+  stateDir: string = ".",
+): Promise<RotateResult> {
+  const state = loadState(stateDir);
+  if (!state) {
+    throw new Error("No cross-backup state found. Run init first.");
+  }
+
+  const partnerIds = state.partners.map((p) => p.id);
+  const allHolders = [state.agentId, ...partnerIds];
+  const threshold = state.threshold;
+
+  // Re-split passphrase with same structure
+  const shamir = await splitPassphrase(passphrase, allHolders, threshold);
+
+  // Update local share
+  const localShareHex = shareToHex(shamir.shares[0]);
+  const localShareHash = hashShare(localShareHex);
+  state.localShareHex = encryptShare(localShareHex, localPassphrase);
+  state.localShareHash = localShareHash;
+  state.version += 1;
+
+  // Update partner shares
+  const sharesToSend = new Map<string, { hex: string; hash: string }>();
+  const now = new Date().toISOString();
+
+  for (let i = 0; i < partnerIds.length; i++) {
+    const partnerShareHex = shareToHex(shamir.shares[i + 1]);
+    const partnerShareHash = hashShare(partnerShareHex);
+
+    // Update partner entry
+    state.partners[i] = {
+      ...state.partners[i],
+      shareHex: encryptShare(partnerShareHex, localPassphrase),
+      shareHash: partnerShareHash,
+      version: state.version,
+      lastVerified: undefined, // needs re-verification after rotation
+    };
+
+    sharesToSend.set(partnerIds[i], {
+      hex: partnerShareHex,
+      hash: partnerShareHash,
+    });
+  }
+
+  saveState(state, stateDir);
+
+  return { newVersion: state.version, sharesToSend };
+}
+
+// ── Recover ────────────────────────────────────────────────────────
+
+export interface RecoverResult {
+  agentId: string;
+  passphrase: string;
+  sharesUsed: number;
+  threshold: number;
+}
+
+/**
+ * Recover a downed agent's passphrase by combining shares.
+ *
+ * This is called by a coordinator (Agent B) who has:
+ * - Their own received share of Agent A
+ * - One or more additional shares from other partners (Agent C, etc.)
+ *
+ * The coordinator decrypts their share, combines with others' plaintext shares,
+ * and reconstructs the original passphrase.
+ *
+ * @param agentId - The downed agent to recover
+ * @param localPassphrase - Our passphrase to decrypt our stored share
+ * @param additionalShares - Plaintext shares from other partners
+ * @param stateDir - Directory with received-shares state
+ */
+export async function recover(
+  agentId: string,
+  localPassphrase: string,
+  additionalShares: string[],
+  stateDir: string = ".",
+): Promise<RecoverResult> {
+  // Load our received share for this agent
+  const receivedPath = `${stateDir}/.exuvia-received-shares.json`;
+  if (!existsSync(receivedPath)) {
+    throw new Error("No received shares found. Cannot recover.");
+  }
+
+  const received: Record<string, Partner> = JSON.parse(
+    readFileSync(receivedPath, "utf8"),
+  );
+
+  const partnerData = received[agentId];
+  if (!partnerData) {
+    throw new Error(`No share stored for agent "${agentId}". Cannot recover.`);
+  }
+
+  // Decrypt our share
+  let ourShareHex: string;
+  try {
+    ourShareHex = decryptShare(partnerData.shareHex, localPassphrase);
+  } catch {
+    throw new Error("Failed to decrypt stored share. Wrong passphrase?");
+  }
+
+  // Verify integrity
+  if (hashShare(ourShareHex) !== partnerData.shareHash) {
+    throw new Error("Stored share integrity check failed.");
+  }
+
+  // Combine all shares
+  const allShareHexes = [ourShareHex, ...additionalShares];
+  const shares = allShareHexes.map(hexToShare);
+
+  const passphrase = await combineShares(shares);
+
+  return {
+    agentId,
+    passphrase,
+    sharesUsed: allShareHexes.length,
+    threshold: allShareHexes.length, // we used exactly this many
+  };
+}
+
+// ── Status ─────────────────────────────────────────────────────────
+
 /**
  * Get cross-backup status overview.
  */

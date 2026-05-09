@@ -38,10 +38,14 @@ export {
   encryptShare,
   decryptShare,
   hashShare,
+  rotate as crossBackupRotate,
+  recover as crossBackupRecover,
 } from "./cross-backup.js";
 export type {
   CrossBackupState,
   CrossBackupStatus,
   Partner,
   InitResult,
+  RotateResult,
+  RecoverResult,
 } from "./cross-backup.js";

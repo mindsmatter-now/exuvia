@@ -344,3 +344,189 @@ describe("cross-backup — full cycle (init → distribute → receive → recon
     assert.equal(recovered, SECRET);
   });
 });
+
+describe("cross-backup — rotate", () => {
+  let tmpDir: string;
+
+  before(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "exuvia-rotate-"));
+  });
+
+  after(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("should re-split and bump version", async () => {
+    const { rotate } = await import("./cross-backup.js");
+
+    // Init first
+    const result = await init(
+      "nyx",
+      ["tyto", "kiro"],
+      "MySecret!2026",
+      "local-key",
+      tmpDir,
+    );
+    assert.equal(result.state.version, 1);
+
+    // Rotate
+    const rotated = await rotate("MySecret!2026", "local-key", tmpDir);
+    assert.equal(rotated.newVersion, 2);
+    assert.ok(rotated.sharesToSend.has("tyto"));
+    assert.ok(rotated.sharesToSend.has("kiro"));
+
+    // State persisted with new version
+    const s = loadState(tmpDir)!;
+    assert.equal(s.version, 2);
+    assert.equal(s.partners[0].version, 2);
+    assert.equal(s.partners[1].version, 2);
+  });
+
+  it("should generate different shares on rotation", async () => {
+    const { rotate } = await import("./cross-backup.js");
+    const tmpDir2 = mkdtempSync(join(tmpdir(), "exuvia-rot2-"));
+
+    await init("nyx", ["tyto", "kiro"], "Secret", "key", tmpDir2);
+    const state1 = loadState(tmpDir2)!;
+    const hash1 = state1.localShareHash;
+
+    await rotate("Secret", "key", tmpDir2);
+    const state2 = loadState(tmpDir2)!;
+    const hash2 = state2.localShareHash;
+
+    // New shares should differ (randomness in Shamir split)
+    assert.notEqual(hash1, hash2);
+
+    rmSync(tmpDir2, { recursive: true, force: true });
+  });
+
+  it("should throw if no state exists", async () => {
+    const { rotate } = await import("./cross-backup.js");
+    await assert.rejects(
+      () => rotate("secret", "key", "/tmp/nonexistent-rotate-dir"),
+      /No cross-backup state found/,
+    );
+  });
+
+  it("should produce recoverable shares after rotation", async () => {
+    const { rotate } = await import("./cross-backup.js");
+    const { combineShares: combine, hexToShare: h2s } =
+      await import("./shamir.js");
+    const tmpDir3 = mkdtempSync(join(tmpdir(), "exuvia-rot3-"));
+
+    const SECRET = "RotateRecoverTest!";
+    await init("nyx", ["tyto", "kiro"], SECRET, "key", tmpDir3);
+
+    // Rotate
+    const rotated = await rotate(SECRET, "key", tmpDir3);
+    const tytoShare = rotated.sharesToSend.get("tyto")!;
+    const kiroShare = rotated.sharesToSend.get("kiro")!;
+
+    // Recover with new shares
+    const recovered = await combine([h2s(tytoShare.hex), h2s(kiroShare.hex)]);
+    assert.equal(recovered, SECRET);
+
+    rmSync(tmpDir3, { recursive: true, force: true });
+  });
+});
+
+describe("cross-backup — recover", () => {
+  let tmpCoordinator: string;
+  let tmpHelper: string;
+
+  before(() => {
+    tmpCoordinator = mkdtempSync(join(tmpdir(), "exuvia-coord-"));
+    tmpHelper = mkdtempSync(join(tmpdir(), "exuvia-helper-"));
+  });
+
+  after(() => {
+    rmSync(tmpCoordinator, { recursive: true, force: true });
+    rmSync(tmpHelper, { recursive: true, force: true });
+  });
+
+  it("should recover passphrase using recover()", async () => {
+    const { recover } = await import("./cross-backup.js");
+
+    const SECRET = "RecoverTest!2026";
+
+    // Nyx inits and distributes
+    const nyxDir = mkdtempSync(join(tmpdir(), "exuvia-nyx-rec-"));
+    const nyxResult = await init(
+      "nyx",
+      ["tyto", "kiro"],
+      SECRET,
+      "nyx-key",
+      nyxDir,
+    );
+
+    const tytoShare = nyxResult.sharesToSend.get("tyto")!;
+    const kiroShare = nyxResult.sharesToSend.get("kiro")!;
+
+    // Tyto (coordinator) receives
+    receiveShare(
+      "nyx",
+      tytoShare.hex,
+      tytoShare.hash,
+      "tyto-key",
+      undefined,
+      tmpCoordinator,
+    );
+
+    // Kiro (helper) sends plaintext share to Tyto
+    // In real life: Kiro decrypts their share and sends it securely
+    const result = await recover(
+      "nyx",
+      "tyto-key",
+      [kiroShare.hex],
+      tmpCoordinator,
+    );
+
+    assert.equal(result.passphrase, SECRET);
+    assert.equal(result.agentId, "nyx");
+    assert.equal(result.sharesUsed, 2);
+
+    rmSync(nyxDir, { recursive: true, force: true });
+  });
+
+  it("should throw with wrong passphrase", async () => {
+    const { recover } = await import("./cross-backup.js");
+
+    const nyxDir = mkdtempSync(join(tmpdir(), "exuvia-nyx-rec2-"));
+    const nyxResult = await init("nyx", ["tyto"], "Secret", "nyx-key", nyxDir);
+
+    const tytoShare = nyxResult.sharesToSend.get("tyto")!;
+    receiveShare(
+      "nyx",
+      tytoShare.hex,
+      tytoShare.hash,
+      "tyto-key",
+      undefined,
+      tmpCoordinator,
+    );
+
+    await assert.rejects(
+      () => recover("nyx", "WRONG-key", [], tmpCoordinator),
+      /Failed to decrypt/,
+    );
+
+    rmSync(nyxDir, { recursive: true, force: true });
+  });
+
+  it("should throw when no share for agent", async () => {
+    const { recover } = await import("./cross-backup.js");
+
+    await assert.rejects(
+      () => recover("unknown-agent", "key", [], tmpCoordinator),
+      /No share stored for agent/,
+    );
+  });
+
+  it("should throw when no received shares file", async () => {
+    const { recover } = await import("./cross-backup.js");
+
+    await assert.rejects(
+      () => recover("nyx", "key", [], "/tmp/nonexistent-recover-dir"),
+      /No received shares found/,
+    );
+  });
+});
