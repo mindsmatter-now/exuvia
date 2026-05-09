@@ -18,6 +18,7 @@ import {
   createCipheriv,
   createDecipheriv,
   randomBytes,
+  scryptSync,
 } from "crypto";
 import {
   splitPassphrase,
@@ -64,16 +65,31 @@ export interface InitResult {
 const STATE_FILE = ".exuvia-cross-backup.json";
 const CROSS_BACKUP_CIPHER = "aes-256-gcm";
 
+// scrypt params — matches crypto.ts (Tyto: scrypt from day 1, not SHA-256)
+const SCRYPT_PARAMS_PROD = {
+  N: 131072, // 2^17
+  r: 8,
+  p: 1,
+  maxmem: 256 * 1024 * 1024,
+};
+const SCRYPT_PARAMS_TEST = { N: 1024, r: 8, p: 1, maxmem: 256 * 1024 * 1024 };
+const SCRYPT_PARAMS =
+  process.env.EXUVIA_TEST_MODE === "1" ? SCRYPT_PARAMS_TEST : SCRYPT_PARAMS_PROD;
+
+function deriveShareKey(passphrase: string, salt: Buffer): Buffer {
+  return scryptSync(passphrase, salt, 32, SCRYPT_PARAMS);
+}
+
 // ── Share Encryption (Kiro F1: local encryption with own passphrase) ───
 
 /**
  * Encrypt a share hex string with a local passphrase.
- * Uses AES-256-GCM with scrypt-derived key.
+ * Uses AES-256-GCM with scrypt-derived key (N=2^17, r=8, p=1).
  * Format: salt(32) + iv(12) + ciphertext + authTag(16) → hex
  */
 export function encryptShare(shareHex: string, passphrase: string): string {
   const salt = randomBytes(32);
-  const key = createHash("sha256").update(salt).update(passphrase).digest(); // 32 bytes
+  const key = deriveShareKey(passphrase, salt);
   const iv = randomBytes(12);
   const cipher = createCipheriv(CROSS_BACKUP_CIPHER, key, iv);
   const plaintext = Buffer.from(shareHex, "utf8");
@@ -92,7 +108,7 @@ export function decryptShare(encryptedHex: string, passphrase: string): string {
   const authTag = data.subarray(data.length - 16);
   const ciphertext = data.subarray(44, data.length - 16);
 
-  const key = createHash("sha256").update(salt).update(passphrase).digest();
+  const key = deriveShareKey(passphrase, salt);
   const decipher = createDecipheriv(CROSS_BACKUP_CIPHER, key, iv);
   decipher.setAuthTag(authTag);
   const decrypted = Buffer.concat([
