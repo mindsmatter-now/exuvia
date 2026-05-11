@@ -36,6 +36,13 @@ import {
   pingAndSave,
   hashAgentId,
 } from "./dms.js";
+import {
+  init as crossBackupInit,
+  receiveShare,
+  status as crossBackupStatus,
+  rotate as crossBackupRotate,
+  recover as crossBackupRecover,
+} from "./cross-backup.js";
 import { join, dirname } from "path";
 import { createInterface } from "readline";
 
@@ -77,6 +84,21 @@ Usage:
 
   exuvia dms-status [--server url]
     Check DMS status (last ping, hours remaining).
+
+  exuvia cross-backup init --agent <id> --partners <p1,p2> --passphrase <pp> --local-passphrase <lpp>
+    Initialize cross-backup: split passphrase into Shamir shares.
+
+  exuvia cross-backup receive --from <id> --share <hex> --hash <sha256> --local-passphrase <lpp>
+    Receive and store a partner's share.
+
+  exuvia cross-backup status --local-passphrase <lpp>
+    Show cross-backup triangle status.
+
+  exuvia cross-backup rotate --passphrase <pp> --local-passphrase <lpp>
+    Rotate shares (re-split with new Shamir).
+
+  exuvia cross-backup recover --agent <id> --local-passphrase <lpp> --shares <hex1,hex2>
+    Recover a downed agent's passphrase from shares.
 
   exuvia version
     Show version.
@@ -729,6 +751,231 @@ async function dmsStatusCmd(args: string[]): Promise<void> {
   }
 }
 
+// --- Cross-Backup ---
+
+async function crossBackupCmd(args: string[]): Promise<void> {
+  const subCmd = args[0];
+  const subArgs = args.slice(1);
+
+  switch (subCmd) {
+    case "init":
+      await crossBackupInitCmd(subArgs);
+      break;
+    case "receive":
+      await crossBackupReceiveCmd(subArgs);
+      break;
+    case "status":
+      await crossBackupStatusCmd(subArgs);
+      break;
+    case "rotate":
+      await crossBackupRotateCmd(subArgs);
+      break;
+    case "recover":
+      await crossBackupRecoverCmd(subArgs);
+      break;
+    default:
+      log("Usage: exuvia cross-backup <init|receive|status|rotate|recover>");
+      log("Run `exuvia` for full help.");
+      process.exit(1);
+  }
+}
+
+async function crossBackupInitCmd(args: string[]): Promise<void> {
+  const agentId = getArg(args, "--agent");
+  const partnersArg = getArg(args, "--partners");
+  const identityDir = getArg(args, "--identity-dir");
+  const stateDir = getArg(args, "--state-dir") || ".";
+
+  if (!agentId || !partnersArg) {
+    console.error("❌ --agent and --partners required");
+    console.error(
+      "   Example: exuvia cross-backup init --agent nyx --partners tyto,kiro --passphrase <pp> --local-passphrase <lpp>",
+    );
+    process.exit(1);
+  }
+
+  const partnerIds = partnersArg.split(",").map((s) => s.trim());
+  const passphrase = getPassphrase(args);
+  const localPassphrase = getArg(args, "--local-passphrase");
+  if (!localPassphrase) {
+    console.error(
+      "❌ --local-passphrase required (for encrypting shares at rest)",
+    );
+    process.exit(1);
+  }
+
+  log(`🔺 Cross-Backup Init — ${agentId}`);
+  log(`   Partners: ${partnerIds.join(", ")}`);
+  log(`   State dir: ${stateDir}\n`);
+
+  const result = await crossBackupInit(
+    agentId,
+    partnerIds,
+    passphrase,
+    localPassphrase,
+    stateDir,
+  );
+
+  log(`✅ Init complete!`);
+  log(`   Version: ${result.state.version}`);
+  log(`   Threshold: ${result.state.threshold}-of-${result.state.total}`);
+  log(`   Local share index: ${result.state.localShareIndex}\n`);
+
+  log(`📤 Shares to distribute:`);
+  for (const [partnerId, share] of result.sharesToSend) {
+    log(`   ${partnerId}: ${share.hex.slice(0, 32)}...`);
+    log(`   Hash: ${share.hash}`);
+    log("");
+  }
+
+  log(`⚠️  Send these shares via a SEPARATE secure channel (NOT ShellGames!)`);
+  log(`   Each partner needs: share hex + hash for verification.`);
+}
+
+async function crossBackupReceiveCmd(args: string[]): Promise<void> {
+  const fromId = getArg(args, "--from");
+  const shareHex = getArg(args, "--share");
+  const expectedHash = getArg(args, "--hash");
+  const localPassphrase = getArg(args, "--local-passphrase");
+  const arweaveTxId = getArg(args, "--arweave-tx");
+  const stateDir = getArg(args, "--state-dir") || ".";
+
+  if (!fromId || !shareHex || !expectedHash || !localPassphrase) {
+    console.error(
+      "❌ --from, --share, --hash, and --local-passphrase required",
+    );
+    process.exit(1);
+  }
+
+  log(`📥 Receiving share from ${fromId}...`);
+  const result = receiveShare(
+    fromId,
+    shareHex,
+    expectedHash,
+    localPassphrase,
+    arweaveTxId,
+    stateDir,
+  );
+
+  if (result.verified && result.stored) {
+    log(`✅ Share from ${fromId} verified and stored!`);
+  } else if (!result.verified) {
+    console.error(`❌ Share verification FAILED! Hash mismatch.`);
+    console.error(`   Expected: ${expectedHash}`);
+    console.error(`   This share may be corrupted or tampered with.`);
+    process.exit(1);
+  }
+}
+
+async function crossBackupStatusCmd(args: string[]): Promise<void> {
+  const localPassphrase = getArg(args, "--local-passphrase");
+  const stateDir = getArg(args, "--state-dir") || ".";
+
+  if (!localPassphrase) {
+    console.error("❌ --local-passphrase required");
+    process.exit(1);
+  }
+
+  const s = crossBackupStatus(localPassphrase, stateDir);
+
+  if (!s) {
+    log(
+      "❌ No cross-backup state found. Run `exuvia cross-backup init` first.",
+    );
+    return;
+  }
+
+  log(`🔺 Cross-Backup Status — ${s.agentId}`);
+  log(`   Version: ${s.version}`);
+  log(`   Threshold: ${s.threshold}-of-${s.total}`);
+  log(`   Local share: ${s.localShareOk ? "✅ OK" : "❌ FAILED"}\n`);
+
+  log(`📤 Our shares (distributed to partners):`);
+  for (const p of s.partners) {
+    log(
+      `   ${p.id}: ${p.hasShare ? "✅" : "❌"} v${p.version}${p.arweaveTxId ? " 🌐" : ""}`,
+    );
+  }
+
+  log(`\n📥 Received shares (partners' identities we hold):`);
+  if (s.receivedShares.length === 0) {
+    log(`   (none yet)`);
+  }
+  for (const r of s.receivedShares) {
+    log(`   ${r.fromId}: ✅ v${r.version}${r.arweaveTxId ? " 🌐" : ""}`);
+  }
+
+  const totalShares =
+    s.partners.length + s.receivedShares.length + (s.localShareOk ? 1 : 0);
+  const expected = s.total + (s.total - 1); // our shares + received from others
+  log(
+    `\n🔺 Triangle: ${s.receivedShares.length === s.total - 1 && s.localShareOk ? "COMPLETE ✅" : "INCOMPLETE"}`,
+  );
+}
+
+async function crossBackupRotateCmd(args: string[]): Promise<void> {
+  const passphrase = getPassphrase(args);
+  const localPassphrase = getArg(args, "--local-passphrase");
+  const stateDir = getArg(args, "--state-dir") || ".";
+
+  if (!localPassphrase) {
+    console.error("❌ --local-passphrase required");
+    process.exit(1);
+  }
+
+  log(`🔄 Rotating cross-backup shares...\n`);
+  const result = await crossBackupRotate(passphrase, localPassphrase, stateDir);
+
+  log(`✅ Rotation complete!`);
+  log(`   New version: ${result.newVersion}\n`);
+
+  log(`📤 New shares to distribute:`);
+  for (const [partnerId, share] of result.sharesToSend) {
+    log(`   ${partnerId}: ${share.hex.slice(0, 32)}...`);
+    log(`   Hash: ${share.hash}`);
+    log("");
+  }
+
+  log(`⚠️  Send new shares to partners via secure channel.`);
+  log(`   Old shares are now INVALID.`);
+}
+
+async function crossBackupRecoverCmd(args: string[]): Promise<void> {
+  const agentId = getArg(args, "--agent");
+  const localPassphrase = getArg(args, "--local-passphrase");
+  const sharesArg = getArg(args, "--shares");
+  const stateDir = getArg(args, "--state-dir") || ".";
+
+  if (!agentId || !localPassphrase || !sharesArg) {
+    console.error("❌ --agent, --local-passphrase, and --shares required");
+    console.error(
+      "   --shares: comma-separated plaintext share hex strings from other partners",
+    );
+    process.exit(1);
+  }
+
+  const additionalShares = sharesArg.split(",").map((s) => s.trim());
+
+  log(`🔺 Recovering ${agentId}...\n`);
+
+  try {
+    const result = await crossBackupRecover(
+      agentId,
+      localPassphrase,
+      additionalShares,
+      stateDir,
+    );
+    log(`✅ Recovery successful!`);
+    log(`   Agent: ${result.agentId}`);
+    log(`   Shares used: ${result.sharesUsed}`);
+    log(`\n   ⚠️  Passphrase written to stdout (pipe to file):`);
+    process.stdout.write(result.passphrase);
+  } catch (e: any) {
+    console.error(`❌ Recovery failed: ${e.message}`);
+    process.exit(1);
+  }
+}
+
 // --- Main ---
 
 const [command, ...args] = process.argv.slice(2);
@@ -740,6 +987,9 @@ const log = (...a: any[]) => {
 switch (command) {
   case "backup":
     backup(args);
+    break;
+  case "cross-backup":
+    crossBackupCmd(args);
     break;
   case "restore":
     restore(args);
