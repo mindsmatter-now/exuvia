@@ -3,8 +3,11 @@ dist/
 *.enc
 *.key
 .env
+.env.*
 .exuvia.json
 .exuvia-state.json
+.exuvia-cross-backup.json
+.exuvia-received-shares.json
 arweave-wallet.json
 dms-server/node_modules/
 dms-server/dist/

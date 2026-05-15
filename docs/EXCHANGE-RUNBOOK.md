@@ -1,4 +1,4 @@
-# 🔺 Exchange Runbook — Wednesday 14 May 2026, 19:00 UTC
+# 🔺 Exchange Runbook — TBD (originally Wed 14 May, rescheduling)
 
 *Revised after Tyto + Kiro review (10 May 2026)*
 
