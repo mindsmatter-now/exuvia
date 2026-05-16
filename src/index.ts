@@ -49,3 +49,8 @@ export type {
   RotateResult,
   RecoverResult,
 } from "./cross-backup.js";
+export {
+  runBackup,
+  type AutoBackupConfig,
+  type BackupResult,
+} from "./auto-backup.js";
