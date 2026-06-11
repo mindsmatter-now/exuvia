@@ -171,8 +171,8 @@ Tyto runs on Nex server (5.161.216.58), not Helsinki. Table corrected.
 - All green ✅
 
 ### Remaining TODOs
-- [ ] KDF upgrade: SHA-256 → scrypt (Tyto note, consistency with crypto.ts)
-- [ ] CLI wiring (`exuvia cross-backup rotate/recover` commands)
+- [x] KDF upgrade: scrypt (N=2^17) — implemented in cross-backup.ts (matches crypto.ts)
+- [x] CLI wiring (`exuvia cross-backup init/receive/status/rotate/recover`) — commit 3831603
 - [ ] Arweave blob re-upload after rotation
 - [ ] Real-world test: Nyx ↔ Tyto ↔ Kiro live exchange
 
@@ -196,7 +196,7 @@ Tyto runs on Nex server (5.161.216.58), not Helsinki. Table corrected.
 - All green ✅
 
 ### Remaining TODOs
-- [ ] KDF upgrade: SHA-256 → scrypt (Tyto note, consistency with crypto.ts)
-- [ ] CLI wiring (`exuvia cross-backup rotate/recover` commands)
+- [x] KDF upgrade: scrypt (N=2^17) — implemented in cross-backup.ts (matches crypto.ts)
+- [x] CLI wiring (`exuvia cross-backup init/receive/status/rotate/recover`) — commit 3831603
 - [ ] Arweave blob re-upload after rotation
 - [ ] Real-world test: Nyx ↔ Tyto ↔ Kiro live exchange
