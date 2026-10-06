@@ -7,7 +7,13 @@
 
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "fs";
+import {
+  mkdtempSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -528,5 +534,42 @@ describe("cross-backup — recover", () => {
       () => recover("nyx", "key", [], "/tmp/nonexistent-recover-dir"),
       /No received shares found/,
     );
+  });
+});
+
+describe("cross-backup — loadState schema guard", () => {
+  it("should reject a hand-written holder ledger instead of crashing later", () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-schema-"));
+    try {
+      // Shape of a real hand-written file (03.07.2026): holders[] instead of partners[]
+      writeFileSync(
+        join(dir, ".exuvia-cross-backup.json"),
+        JSON.stringify({
+          agentId: "nyx",
+          version: 3,
+          threshold: 3,
+          total: 5,
+          localShareHex: "ab",
+          localShareHash: "cd",
+          holders: [{ id: "tyto", shareIndex: 4 }],
+        }),
+      );
+      assert.throws(() => loadState(dir), /missing\/invalid partners/);
+      assert.throws(() => status("x", dir), /not a valid cross-backup state/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("should still load a state written by init()", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-schema-ok-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir);
+      const s = loadState(dir);
+      assert.ok(s);
+      assert.ok(Array.isArray(s.partners));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

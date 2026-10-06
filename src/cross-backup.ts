@@ -74,7 +74,9 @@ const SCRYPT_PARAMS_PROD = {
 };
 const SCRYPT_PARAMS_TEST = { N: 1024, r: 8, p: 1, maxmem: 256 * 1024 * 1024 };
 const SCRYPT_PARAMS =
-  process.env.EXUVIA_TEST_MODE === "1" ? SCRYPT_PARAMS_TEST : SCRYPT_PARAMS_PROD;
+  process.env.EXUVIA_TEST_MODE === "1"
+    ? SCRYPT_PARAMS_TEST
+    : SCRYPT_PARAMS_PROD;
 
 function deriveShareKey(passphrase: string, salt: Buffer): Buffer {
   return scryptSync(passphrase, salt, 32, SCRYPT_PARAMS);
@@ -129,10 +131,40 @@ export function hashShare(shareHex: string): string {
 
 // ── State Management ───────────────────────────────────────────────
 
+/**
+ * Fields every CrossBackupState must have. A file that lacks them was not
+ * written by init()/rotate() (e.g. a hand-written holder ledger) and must be
+ * rejected loudly — otherwise status() crashes deep inside with a TypeError,
+ * or worse, a partial object is treated as a valid backup.
+ */
+const REQUIRED_STATE_FIELDS: Array<[keyof CrossBackupState, string]> = [
+  ["agentId", "string"],
+  ["partners", "array"],
+  ["localShareHex", "string"],
+  ["localShareHash", "string"],
+  ["version", "number"],
+  ["threshold", "number"],
+  ["total", "number"],
+];
+
 export function loadState(stateDir: string = "."): CrossBackupState | null {
   const path = `${stateDir}/${STATE_FILE}`;
   if (!existsSync(path)) return null;
-  return JSON.parse(readFileSync(path, "utf8"));
+  const raw = JSON.parse(readFileSync(path, "utf8"));
+  const problems: string[] = [];
+  for (const [field, kind] of REQUIRED_STATE_FIELDS) {
+    const v = raw?.[field];
+    const ok = kind === "array" ? Array.isArray(v) : typeof v === kind;
+    if (!ok) problems.push(`${String(field)} (expected ${kind})`);
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `${path} is not a valid cross-backup state: missing/invalid ${problems.join(", ")}. ` +
+        `It was probably not written by \`cross-backup init\`. ` +
+        `See docs/LOCAL-SHARE-REINIT.md.`,
+    );
+  }
+  return raw as CrossBackupState;
 }
 
 export function saveState(
