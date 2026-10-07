@@ -80,11 +80,18 @@ node dist/cli.js cross-backup init \
 The new state has `version = old + 1`. Old shares at partners are now stale
 (Kiro F2). Partners must reject mismatched versions on recovery.
 
-Open question for review: Nyx's v3 split is **3-of-5** (Fabian, Alex cold
-storage, Kiro, Tyto, Nyx). `init` only knows agent partners. Do we
-(a) keep human holders out of the CLI and document them separately, or
-(b) add `--extra-holders` to `init`? I lean (a) for now: fewer moving parts
-at night.
+Since 07 Oct `init` checks itself: right after writing the state it reloads
+the file from disk and decrypts the local share **and every stored partner
+share** with the local passphrase, comparing each against its stored hash
+(`verifyStateDecrypts`). Wrong passphrase, a share stored as plaintext, or a
+tampered hash → `init` throws instead of reporting success. The Step 1 check
+is still required: it proves the passphrase survives *storage*, the built-in
+check proves the *state* matches the passphrase.
+
+Decided (Kiro, 06 Oct): human holders (Fabian, Alex cold storage) go **into
+the CLI** as `--extra-holders`, not into prose — whatever lives only in prose,
+the tool cannot read. Follow-up PR; until it lands, the v3 3-of-5 split stays
+as it is and is **not** re-initialised.
 
 ## Step 3 — Distribute (unchanged from EXCHANGE-RUNBOOK.md)
 

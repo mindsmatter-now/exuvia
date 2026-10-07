@@ -198,6 +198,40 @@ export function saveState(
   writeFileSync(path, JSON.stringify(state, null, 2));
 }
 
+// ── Round-trip check (Kiro 🐺: only a real decrypt proves the passphrase) ──
+
+/**
+ * Decrypt the local share and every stored partner share with
+ * `localPassphrase` and compare against the stored hashes. Throws with the
+ * first failing share. A structural guard cannot catch a wrong passphrase or
+ * a share that was stored as plaintext — this can.
+ */
+export function verifyStateDecrypts(
+  state: CrossBackupState,
+  localPassphrase: string,
+): void {
+  const check = (label: string, hex: string, hash: string) => {
+    let plain: string;
+    try {
+      plain = decryptShare(hex, localPassphrase);
+    } catch {
+      throw new Error(
+        `${label}: cannot be decrypted with this local passphrase ` +
+          `(wrong passphrase, or stored unencrypted). See docs/LOCAL-SHARE-REINIT.md.`,
+      );
+    }
+    if (hashShare(plain) !== hash) {
+      throw new Error(
+        `${label}: decrypts, but the hash does not match the stored hash.`,
+      );
+    }
+  };
+  check("local share", state.localShareHex, state.localShareHash);
+  for (const p of state.partners) {
+    check(`share for ${p.id}`, p.shareHex, p.shareHash);
+  }
+}
+
 // ── Init ───────────────────────────────────────────────────────────
 
 /**
@@ -268,6 +302,11 @@ export async function init(
   };
 
   saveState(state, stateDir);
+  // Round-trip through the disk: what we just wrote must decrypt with the
+  // passphrase we were given (May 2026: init ran with a passphrase nobody kept).
+  const onDisk = loadState(stateDir);
+  if (!onDisk) throw new Error("init: state file vanished right after writing");
+  verifyStateDecrypts(onDisk, localPassphrase);
 
   return { state, sharesToSend };
 }

@@ -25,6 +25,7 @@ import {
   decryptShare,
   hashShare,
   loadState,
+  verifyStateDecrypts,
 } from "./cross-backup.js";
 
 describe("cross-backup — share encryption", () => {
@@ -588,6 +589,64 @@ describe("cross-backup — loadState schema guard", () => {
       const s = loadState(dir);
       assert.ok(s);
       assert.ok(Array.isArray(s.partners));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("cross-backup — round-trip decrypt check", () => {
+  it("accepts a state written by init() with the same passphrase", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-rt-ok-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir);
+      assert.doesNotThrow(() =>
+        verifyStateDecrypts(loadState(dir)!, "pp-local"),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects the wrong local passphrase", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-rt-wrong-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir);
+      assert.throws(
+        () => verifyStateDecrypts(loadState(dir)!, "pp-other"),
+        /local share: cannot be decrypted/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a share stored as plaintext (structure looks fine)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-rt-plain-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir);
+      const s = loadState(dir)!;
+      const plain = decryptShare(s.partners[1].shareHex, "pp-local");
+      s.partners[1].shareHex = plain; // valid structure, hash matches plaintext, but not encrypted
+      assert.throws(
+        () => verifyStateDecrypts(s, "pp-local"),
+        /share for kiro: cannot be decrypted/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a share whose hash was tampered", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-rt-hash-"));
+    try {
+      await init("nyx", ["tyto"], "pp-main", "pp-local", dir);
+      const s = loadState(dir)!;
+      s.localShareHash = "0".repeat(64);
+      assert.throws(
+        () => verifyStateDecrypts(s, "pp-local"),
+        /hash does not match/,
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
