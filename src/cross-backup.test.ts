@@ -561,6 +561,26 @@ describe("cross-backup — loadState schema guard", () => {
     }
   });
 
+  it("should reject partners[] that is an array of the wrong things", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-schema-partners-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir);
+      const file = join(dir, ".exuvia-cross-backup.json");
+      const good = JSON.parse(readFileSync(file, "utf8"));
+      // Array present, entries wrong: holder-ledger style ids, missing share data
+      good.partners = [{ id: "tyto", shareIndex: "4" }, "kiro"];
+      writeFileSync(file, JSON.stringify(good));
+      assert.throws(
+        () => loadState(dir),
+        /partners\[0\]\.shareIndex \(expected number\)/,
+      );
+      assert.throws(() => loadState(dir), /partners\[0\]\.shareHex/);
+      assert.throws(() => loadState(dir), /partners\[1\] \(expected object\)/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("should still load a state written by init()", async () => {
     const dir = mkdtempSync(join(tmpdir(), "xb-schema-ok-"));
     try {

@@ -147,6 +147,22 @@ const REQUIRED_STATE_FIELDS: Array<[keyof CrossBackupState, string]> = [
   ["total", "number"],
 ];
 
+const REQUIRED_PARTNER_FIELDS: Array<[keyof Partner, string]> = [
+  ["id", "string"],
+  ["shareIndex", "number"],
+  ["shareHex", "string"],
+  ["shareHash", "string"],
+];
+
+function partnerProblems(p: unknown, i: number): string[] {
+  if (typeof p !== "object" || p === null)
+    return [`partners[${i}] (expected object)`];
+  const rec = p as Record<string, unknown>;
+  return REQUIRED_PARTNER_FIELDS.filter(
+    ([f, kind]) => typeof rec[f] !== kind,
+  ).map(([f, kind]) => `partners[${i}].${String(f)} (expected ${kind})`);
+}
+
 export function loadState(stateDir: string = "."): CrossBackupState | null {
   const path = `${stateDir}/${STATE_FILE}`;
   if (!existsSync(path)) return null;
@@ -156,6 +172,12 @@ export function loadState(stateDir: string = "."): CrossBackupState | null {
     const v = raw?.[field];
     const ok = kind === "array" ? Array.isArray(v) : typeof v === kind;
     if (!ok) problems.push(`${String(field)} (expected ${kind})`);
+  }
+  // Kiro 🐺 (06 Oct): an array of WRONG things proves nothing — check every entry.
+  if (Array.isArray(raw?.partners)) {
+    raw.partners.forEach((p: unknown, i: number) => {
+      problems.push(...partnerProblems(p, i));
+    });
   }
   if (problems.length > 0) {
     throw new Error(
