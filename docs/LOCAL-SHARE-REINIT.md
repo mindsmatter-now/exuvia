@@ -74,8 +74,15 @@ was never written to disk. **Store → reload → test → only then init.**
 ```bash
 node dist/cli.js cross-backup init \
   --agent <name> --partners <p1>,<p2> \
-  --passphrase "<backup passphrase>" --local-passphrase "$LPP_FROM_STORAGE"
+  --passphrase "<backup passphrase>" --local-passphrase-file <file where the passphrase is KEPT>
 ```
+
+Use `--local-passphrase-file`, not `--local-passphrase`. With the file variant
+`init` re-reads that file after writing the state and verifies with what is
+actually stored there. Missing file, empty file, or a different passphrase in
+the file → `init` fails. (`--local-passphrase` still works, but then the check
+only proves the state matches what you typed, not that it is kept.) If the
+passphrase lives in `pass`, export it to a 0600 file in a tmpfs for the run.
 
 The new state has `version = old + 1`. Old shares at partners are now stale
 (Kiro F2). Partners must reject mismatched versions on recovery.
@@ -86,7 +93,10 @@ share** with the local passphrase, comparing each against its stored hash
 (`verifyStateDecrypts`). Wrong passphrase, a share stored as plaintext, or a
 tampered hash → `init` throws instead of reporting success. The Step 1 check
 is still required: it proves the passphrase survives *storage*, the built-in
-check proves the *state* matches the passphrase.
+check proves the *state* matches the passphrase. Since 08 Oct, with
+`--local-passphrase-file`, the built-in check also reads the passphrase back
+from storage (Kiro's review: a check that decrypts with the same variable it
+encrypted with can almost only be green).
 
 Decided (Kiro, 06 Oct): human holders (Fabian, Alex cold storage) go **into
 the CLI** as `--extra-holders`, not into prose — whatever lives only in prose,
