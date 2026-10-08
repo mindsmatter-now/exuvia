@@ -640,7 +640,14 @@ describe("cross-backup — init reads the local passphrase back from storage", (
     const dir = mkdtempSync(join(tmpdir(), "xb-kept-diff-"));
     try {
       await assert.rejects(
-        init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir, () => "pp-typo"),
+        init(
+          "nyx",
+          ["tyto", "kiro"],
+          "pp-main",
+          "pp-local",
+          dir,
+          () => "pp-typo",
+        ),
         /cannot be decrypted/,
       );
     } finally {

@@ -85,7 +85,8 @@ Usage:
   exuvia dms-status [--server url]
     Check DMS status (last ping, hours remaining).
 
-  exuvia cross-backup init --agent <id> --partners <p1,p2> --passphrase <pp> --local-passphrase <lpp>
+  exuvia cross-backup init --agent <id> --partners <p1,p2> --passphrase <pp> --local-passphrase-file <file>
+    (--local-passphrase <lpp> still works, but only the file variant proves the passphrase is kept)
     Initialize cross-backup: split passphrase into Shamir shares.
 
   exuvia cross-backup receive --from <id> --share <hex> --hash <sha256> --local-passphrase <lpp>
@@ -796,10 +797,24 @@ async function crossBackupInitCmd(args: string[]): Promise<void> {
 
   const partnerIds = partnersArg.split(",").map((s) => s.trim());
   const passphrase = getPassphrase(args);
-  const localPassphrase = getArg(args, "--local-passphrase");
+  // Prefer --local-passphrase-file: init then re-reads the FILE after writing the
+  // state and verifies with what is actually stored (not with what we typed).
+  const lppFile = getArg(args, "--local-passphrase-file");
+  let localPassphrase = getArg(args, "--local-passphrase");
+  let loadKept: (() => string) | undefined;
+  if (lppFile) {
+    if (!existsSync(lppFile)) {
+      console.error(
+        `❌ Local passphrase file not found: ${lppFile} (store it first)`,
+      );
+      process.exit(1);
+    }
+    localPassphrase = readFileSync(lppFile, "utf8").trim();
+    loadKept = () => readFileSync(lppFile, "utf8");
+  }
   if (!localPassphrase) {
     console.error(
-      "❌ --local-passphrase required (for encrypting shares at rest)",
+      "❌ --local-passphrase-file (preferred) or --local-passphrase required (for encrypting shares at rest)",
     );
     process.exit(1);
   }
@@ -814,6 +829,7 @@ async function crossBackupInitCmd(args: string[]): Promise<void> {
     passphrase,
     localPassphrase,
     stateDir,
+    loadKept,
   );
 
   log(`✅ Init complete!`);
