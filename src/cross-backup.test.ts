@@ -595,6 +595,60 @@ describe("cross-backup — loadState schema guard", () => {
   });
 });
 
+describe("cross-backup — init reads the local passphrase back from storage", () => {
+  it("passes when the stored passphrase matches", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-kept-ok-"));
+    const file = join(dir, "lpp.txt");
+    try {
+      writeFileSync(file, "pp-local\n");
+      await init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir, () =>
+        readFileSync(file, "utf8"),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when the passphrase was NEVER stored (the May 2026 case)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-kept-missing-"));
+    const file = join(dir, "lpp.txt"); // deliberately not written
+    try {
+      await assert.rejects(
+        init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir, () =>
+          readFileSync(file, "utf8"),
+        ),
+        /could not be read back/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when an empty passphrase was stored", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-kept-empty-"));
+    try {
+      await assert.rejects(
+        init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir, () => "  \n"),
+        /could not be read back/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when a DIFFERENT passphrase was stored than the one used", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-kept-diff-"));
+    try {
+      await assert.rejects(
+        init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir, () => "pp-typo"),
+        /cannot be decrypted/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("cross-backup — round-trip decrypt check", () => {
   it("accepts a state written by init() with the same passphrase", async () => {
     const dir = mkdtempSync(join(tmpdir(), "xb-rt-ok-"));

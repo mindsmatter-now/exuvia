@@ -242,6 +242,10 @@ export function verifyStateDecrypts(
  * @param passphrase - The backup passphrase to split
  * @param localPassphrase - Passphrase to encrypt shares at rest
  * @param stateDir - Directory to store state file
+ * @param loadLocalPassphrase - Optional: reads the local passphrase back from
+ *   wherever it is KEPT (pass, file, ...). If given, the round-trip check uses
+ *   what this returns, not the in-memory argument. That is the only way to
+ *   catch "the passphrase was never stored" — the May 2026 failure (Kiro 🐺).
  */
 export async function init(
   agentId: string,
@@ -249,6 +253,7 @@ export async function init(
   passphrase: string,
   localPassphrase: string,
   stateDir: string = ".",
+  loadLocalPassphrase?: () => string | undefined,
 ): Promise<InitResult> {
   const allHolders = [agentId, ...partnerIds];
   const total = allHolders.length;
@@ -306,7 +311,23 @@ export async function init(
   // passphrase we were given (May 2026: init ran with a passphrase nobody kept).
   const onDisk = loadState(stateDir);
   if (!onDisk) throw new Error("init: state file vanished right after writing");
-  verifyStateDecrypts(onDisk, localPassphrase);
+  let kept = localPassphrase;
+  if (loadLocalPassphrase) {
+    let loaded: string | undefined;
+    try {
+      loaded = loadLocalPassphrase();
+    } catch (e) {
+      loaded = undefined;
+    }
+    if (!loaded || !loaded.trim()) {
+      throw new Error(
+        "init: the local passphrase could not be read back from where it is kept " +
+          "(not stored?). Store it first, then init. See docs/LOCAL-SHARE-REINIT.md.",
+      );
+    }
+    kept = loaded.trim();
+  }
+  verifyStateDecrypts(onDisk, kept);
 
   return { state, sharesToSend };
 }
