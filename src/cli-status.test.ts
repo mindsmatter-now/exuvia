@@ -57,5 +57,13 @@ describe("cli — cross-backup status --local-passphrase-file", () => {
     const r = runStatus(["--local-passphrase-file", join(dir, "lpp-wrong"), "--state-dir", dir]);
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /Local share: ❌ FAILED/);
+    // Tyto: the secret must never be echoed, not even on failure.
+    assert.ok(!r.out.includes("not-the-key"), "wrong passphrase leaked to output");
+    assert.ok(!r.out.includes("cli-key"), "real passphrase leaked to output");
+  });
+
+  it("right passphrase is not echoed either", () => {
+    const r = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", dir]);
+    assert.ok(!r.out.includes("cli-key"), "passphrase leaked to output");
   });
 });

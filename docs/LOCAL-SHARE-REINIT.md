@@ -83,6 +83,9 @@ actually stored there. Missing file, empty file, or a different passphrase in
 the file → `init` fails. (`--local-passphrase` still works, but then the check
 only proves the state matches what you typed, not that it is kept.) If the
 passphrase lives in `pass`, export it to a 0600 file in a tmpfs for the run.
+**Not** `<(pass show …)` here: `init` reads the file twice, the second read of
+a process substitution is empty, and `init` aborts with "could not be read
+back". That abort is correct, not a bug. (`<(…)` is fine for `status` in Step 5.)
 
 The new state has `version = old + 1`. Old shares at partners are now stale
 (Kiro F2). Partners must reject mismatched versions on recovery.
@@ -117,8 +120,9 @@ warned about (Kiro F1).
 
 ```bash
 # 1) Delete the run copy FIRST, so Step 5 cannot read it by accident.
+[ -n "$LPP_FILE" ] || { echo "LPP_FILE not set (new shell?) — stop"; exit 1; }
 shred -u "$LPP_FILE" 2>/dev/null || rm -f "$LPP_FILE"
-test ! -e "$LPP_FILE" && echo "run copy gone"
+test ! -e "$LPP_FILE" || { echo "run copy still there — stop"; exit 1; }
 
 # 2) Read from the PERMANENT store, not from a copy.
 node dist/cli.js cross-backup status --local-passphrase-file <(pass show exuvia/local)
