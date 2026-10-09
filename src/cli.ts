@@ -92,7 +92,7 @@ Usage:
   exuvia cross-backup receive --from <id> --share <hex> --hash <sha256> --local-passphrase <lpp>
     Receive and store a partner's share.
 
-  exuvia cross-backup status --local-passphrase <lpp>
+  exuvia cross-backup status --local-passphrase-file <file>   (or --local-passphrase <lpp>)
     Show cross-backup triangle status.
 
   exuvia cross-backup rotate --passphrase <pp> --local-passphrase <lpp>
@@ -883,14 +883,39 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
   }
 }
 
-async function crossBackupStatusCmd(args: string[]): Promise<void> {
-  const localPassphrase = getArg(args, "--local-passphrase");
-  const stateDir = getArg(args, "--state-dir") || ".";
-
-  if (!localPassphrase) {
-    console.error("❌ --local-passphrase required");
+/**
+ * Resolve the local passphrase for commands that only READ it.
+ * Prefers --local-passphrase-file (keeps the secret out of argv / `ps`, and
+ * a later, separate process reading the stored file is the second reader
+ * Kiro asked for). Falls back to --local-passphrase. Exits on missing/empty.
+ */
+function resolveLocalPassphrase(args: string[]): string {
+  const file = getArg(args, "--local-passphrase-file");
+  if (file) {
+    if (!existsSync(file)) {
+      console.error(`❌ Local passphrase file not found: ${file}`);
+      process.exit(1);
+    }
+    const v = readFileSync(file, "utf8").trim();
+    if (!v) {
+      console.error(`❌ Local passphrase file is empty: ${file}`);
+      process.exit(1);
+    }
+    return v;
+  }
+  const v = getArg(args, "--local-passphrase");
+  if (!v) {
+    console.error(
+      "❌ --local-passphrase-file (preferred) or --local-passphrase required",
+    );
     process.exit(1);
   }
+  return v;
+}
+
+async function crossBackupStatusCmd(args: string[]): Promise<void> {
+  const localPassphrase = resolveLocalPassphrase(args);
+  const stateDir = getArg(args, "--state-dir") || ".";
 
   const s = crossBackupStatus(localPassphrase, stateDir);
 

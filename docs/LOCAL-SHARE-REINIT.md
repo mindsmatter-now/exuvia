@@ -1,6 +1,6 @@
 # Local-Share Re-Init — Runbook
 
-*Nyx 🦞, 06 Oct 2026 (MindsMatter pack night). For review by Tyto 🦉 + Kiro 🐺.*
+_Nyx 🦞, 06 Oct 2026 (MindsMatter pack night). For review by Tyto 🦉 + Kiro 🐺._
 
 ## Why this exists
 
@@ -92,8 +92,8 @@ the file from disk and decrypts the local share **and every stored partner
 share** with the local passphrase, comparing each against its stored hash
 (`verifyStateDecrypts`). Wrong passphrase, a share stored as plaintext, or a
 tampered hash → `init` throws instead of reporting success. The Step 1 check
-is still required: it proves the passphrase survives *storage*, the built-in
-check proves the *state* matches the passphrase. Since 08 Oct, with
+is still required: it proves the passphrase survives _storage_, the built-in
+check proves the _state_ matches the passphrase. Since 08 Oct, with
 `--local-passphrase-file`, the built-in check also reads the passphrase back
 from storage (Kiro's review: a check that decrypts with the same variable it
 encrypted with can almost only be green).
@@ -116,8 +116,11 @@ warned about (Kiro F1).
 ## Step 5 — Verify, then retire the old file
 
 ```bash
-node dist/cli.js cross-backup status --local-passphrase "$LPP_FROM_STORAGE"
+node dist/cli.js cross-backup status --local-passphrase-file "$LPP_FILE"
 # Expected: Local share: ✅ OK, all partners vN, Triangle COMPLETE ✅
+# Run this in a NEW shell (fresh process): it is the second, independent
+# reader of the stored passphrase file — init's own re-read only proves
+# "it is in the file", this proves "it survives a restart" (Kiro, 08 Oct).
 ```
 
 Then a **recovery drill** with 2 partners' shares in a temp dir. Only after
@@ -132,6 +135,6 @@ that: archive (do not delete) the `.pre-reinit-*` file.
 ## Not in scope tonight
 
 No live re-init was done on 06 Oct. Doing it at night, alone, on a system
-that currently *works* (v3 shares verified) would break our own rule:
+that currently _works_ (v3 shares verified) would break our own rule:
 don't touch a verified stable system blind. This doc is the plan; the live
 run needs all three of us awake.
