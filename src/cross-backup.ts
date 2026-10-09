@@ -400,9 +400,17 @@ export interface CrossBackupStatus {
   threshold: number;
   total: number;
   localShareOk: boolean;
+  /**
+   * Result of the same full check init runs (verifyStateDecrypts): the local
+   * share AND every stored partner share decrypt with this passphrase and
+   * match their hashes. `null` = all ok, otherwise the first failure label.
+   * (Tyto, 09 Oct: Step 5 promised "all partners", status only checked local.)
+   */
+  allSharesError: string | null;
   partners: Array<{
     id: string;
     hasShare: boolean;
+    shareOk: boolean;
     version: number;
     lastVerified?: string;
     arweaveTxId?: string;
@@ -578,6 +586,21 @@ export function status(
     localShareOk = false;
   }
 
+  // Same full check as init: every stored share must decrypt + match its hash.
+  let allSharesError: string | null = null;
+  try {
+    verifyStateDecrypts(state, localPassphrase);
+  } catch (e) {
+    allSharesError = e instanceof Error ? e.message : String(e);
+  }
+  const partnerOk = (p: { shareHex: string; shareHash: string }): boolean => {
+    try {
+      return hashShare(decryptShare(p.shareHex, localPassphrase)) === p.shareHash;
+    } catch {
+      return false;
+    }
+  };
+
   // Load received shares
   const receivedPath = `${stateDir}/.exuvia-received-shares.json`;
   let received: Record<string, Partner> = {};
@@ -591,9 +614,11 @@ export function status(
     threshold: state.threshold,
     total: state.total,
     localShareOk,
+    allSharesError,
     partners: state.partners.map((p) => ({
       id: p.id,
       hasShare: true,
+      shareOk: partnerOk(p),
       version: p.version,
       lastVerified: p.lastVerified,
       arweaveTxId: p.arweaveTxId,

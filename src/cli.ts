@@ -934,9 +934,12 @@ async function crossBackupStatusCmd(args: string[]): Promise<void> {
   log(`📤 Our shares (distributed to partners):`);
   for (const p of s.partners) {
     log(
-      `   ${p.id}: ${p.hasShare ? "✅" : "❌"} v${p.version}${p.arweaveTxId ? " 🌐" : ""}`,
+      `   ${p.id}: ${p.shareOk ? "✅" : "❌ does not decrypt/match"} v${p.version}${p.arweaveTxId ? " 🌐" : ""}`,
     );
   }
+  log(
+    `   All stored shares: ${s.allSharesError ? `❌ ${s.allSharesError}` : "✅ decrypt + match (same check as init)"}`,
+  );
 
   log(`\n📥 Received shares (partners' identities we hold):`);
   if (s.receivedShares.length === 0) {
@@ -952,6 +955,9 @@ async function crossBackupStatusCmd(args: string[]): Promise<void> {
   log(
     `\n🔺 Triangle: ${s.receivedShares.length === s.total - 1 && s.localShareOk ? "COMPLETE ✅" : "INCOMPLETE"}`,
   );
+
+  // A failed check must be visible to scripts too, not only in the text.
+  if (!s.localShareOk || s.allSharesError) process.exitCode = 1;
 }
 
 async function crossBackupRotateCmd(args: string[]): Promise<void> {
