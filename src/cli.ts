@@ -953,7 +953,9 @@ async function crossBackupStatusCmd(args: string[]): Promise<void> {
     s.partners.length + s.receivedShares.length + (s.localShareOk ? 1 : 0);
   const expected = s.total + (s.total - 1); // our shares + received from others
   log(
-    `\n🔺 Triangle: ${s.receivedShares.length === s.total - 1 && s.localShareOk ? "COMPLETE ✅" : "INCOMPLETE"}`,
+    // Kiro: COMPLETE only if every stored share checks out too, otherwise the
+    // last line (what people read) would say green under a red one.
+    `\n🔺 Triangle: ${s.receivedShares.length === s.total - 1 && s.localShareOk && !s.allSharesError ? "COMPLETE ✅" : "INCOMPLETE"}`,
   );
 
   // A failed check must be visible to scripts too, not only in the text.

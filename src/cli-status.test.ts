@@ -4,11 +4,11 @@
  */
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
-import { init } from "./cross-backup.js";
+import { init, receiveShare, hashShare } from "./cross-backup.js";
 
 // Built as CommonJS: __dirname is dist/ next to the compiled cli.js.
 const CLI = join(__dirname, "cli.js");
@@ -60,6 +60,32 @@ describe("cli — cross-backup status --local-passphrase-file", () => {
     // Tyto: the secret must never be echoed, not even on failure.
     assert.ok(!r.out.includes("not-the-key"), "wrong passphrase leaked to output");
     assert.ok(!r.out.includes("cli-key"), "real passphrase leaked to output");
+  });
+
+  it("local ok but a PARTNER share tampered -> exit 1, Triangle not COMPLETE (Kiro)", async () => {
+    const d = mkdtempSync(join(tmpdir(), "exuvia-cli-tamper-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pass", "cli-key", d);
+      // Without tampering this state would be COMPLETE (both partners' shares
+      // received), so only the allSharesError check can make it INCOMPLETE.
+      for (const from of ["tyto", "kiro"]) {
+        const hex = `${from}-share-for-nyx`;
+        receiveShare(from, hex, hashShare(hex), "cli-key", undefined, d);
+      }
+      const before = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", d]);
+      assert.match(before.out, /Triangle: COMPLETE ✅/, "precondition: untampered state is COMPLETE");
+      const p = join(d, ".exuvia-cross-backup.json");
+      const raw = JSON.parse(readFileSync(p, "utf8"));
+      raw.partners[1].shareHash = "0".repeat(64);
+      writeFileSync(p, JSON.stringify(raw));
+      const r = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", d]);
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, /Local share: ✅ OK/);
+      assert.match(r.out, /All stored shares: ❌/);
+      assert.doesNotMatch(r.out, /Triangle: COMPLETE/);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
   });
 
   it("right passphrase is not echoed either", () => {
