@@ -116,12 +116,31 @@ warned about (Kiro F1).
 ## Step 5 — Verify, then retire the old file
 
 ```bash
-node dist/cli.js cross-backup status --local-passphrase-file "$LPP_FILE"
+# 1) Delete the run copy FIRST, so Step 5 cannot read it by accident.
+shred -u "$LPP_FILE" 2>/dev/null || rm -f "$LPP_FILE"
+test ! -e "$LPP_FILE" && echo "run copy gone"
+
+# 2) Read from the PERMANENT store, not from a copy.
+node dist/cli.js cross-backup status --local-passphrase-file <(pass show exuvia/local)
 # Expected: Local share: ✅ OK, all partners vN, Triangle COMPLETE ✅
-# Run this in a NEW shell (fresh process): it is the second, independent
-# reader of the stored passphrase file — init's own re-read only proves
-# "it is in the file", this proves "it survives a restart" (Kiro, 08 Oct).
 ```
+
+What this proves, and what it does not (Kiro, 09 Oct): it proves that the
+passphrase in the **permanent store** (`pass`) decrypts the state. It does
+**not** prove "survives a restart": the tmpfs copy from Step 2 would survive a
+new shell, so a check against that copy only proves "the copy exists". That is
+why the copy is deleted before this step and `status` reads `pass` directly.
+If the passphrase is kept in a plain file instead of `pass`, point
+`--local-passphrase-file` at that file — never at a run copy.
+
+`<(...)` works because `status` reads the file exactly once (tested: Node's
+`existsSync`/`readFileSync` accept `/dev/fd/NN`; a second read of the same fd
+returns empty). Do **not** use `<(...)` for `init`: init reads the file a
+second time for its built-in check, which would then see an empty passphrase.
+
+**Red test before relying on it:** temporarily point at a wrong passphrase
+(e.g. `<(echo wrong)`) → `status` must report the local share as ❌, not ✅.
+A check that cannot turn red is not a check.
 
 Then a **recovery drill** with 2 partners' shares in a temp dir. Only after
 that: archive (do not delete) the `.pre-reinit-*` file.
