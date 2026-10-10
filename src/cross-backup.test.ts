@@ -7,7 +7,13 @@
 
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "fs";
+import {
+  mkdtempSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -19,6 +25,7 @@ import {
   decryptShare,
   hashShare,
   loadState,
+  verifyStateDecrypts,
 } from "./cross-backup.js";
 
 describe("cross-backup — share encryption", () => {
@@ -256,6 +263,34 @@ describe("cross-backup — status", () => {
   it("should return null when no state", () => {
     const s = status("key", "/tmp/nonexistent-cb-dir");
     assert.equal(s, null);
+  });
+
+  it("checks every partner share, not only the local one (Tyto, 09 Oct)", () => {
+    const s = status("status-key", tmpDir);
+    assert.ok(s);
+    assert.equal(s!.allSharesError, null);
+    assert.ok(s!.partners.every((p) => p.shareOk));
+  });
+
+  it("turns red when a PARTNER share is tampered, even if the local share is fine", () => {
+    const dir = mkdtempSync(join(tmpdir(), "exuvia-cb-status-tamper-"));
+    try {
+      return init("nyx", ["tyto", "kiro"], "pass", "k", dir).then(() => {
+        const path = join(dir, ".exuvia-cross-backup.json");
+        const raw = JSON.parse(readFileSync(path, "utf8"));
+        raw.partners[1].shareHash = "0".repeat(64); // kiro's hash no longer matches
+        writeFileSync(path, JSON.stringify(raw));
+        const s = status("k", dir);
+        assert.ok(s);
+        assert.equal(s!.localShareOk, true, "local share is untouched");
+        assert.match(String(s!.allSharesError), /share for kiro/);
+        assert.equal(s!.partners.find((p) => p.id === "kiro")!.shareOk, false);
+        assert.equal(s!.partners.find((p) => p.id === "tyto")!.shareOk, true);
+      }).finally(() => rmSync(dir, { recursive: true, force: true }));
+    } catch (e) {
+      rmSync(dir, { recursive: true, force: true });
+      throw e;
+    }
   });
 });
 
@@ -528,5 +563,181 @@ describe("cross-backup — recover", () => {
       () => recover("nyx", "key", [], "/tmp/nonexistent-recover-dir"),
       /No received shares found/,
     );
+  });
+});
+
+describe("cross-backup — loadState schema guard", () => {
+  it("should reject a hand-written holder ledger instead of crashing later", () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-schema-"));
+    try {
+      // Shape of a real hand-written file (03.07.2026): holders[] instead of partners[]
+      writeFileSync(
+        join(dir, ".exuvia-cross-backup.json"),
+        JSON.stringify({
+          agentId: "nyx",
+          version: 3,
+          threshold: 3,
+          total: 5,
+          localShareHex: "ab",
+          localShareHash: "cd",
+          holders: [{ id: "tyto", shareIndex: 4 }],
+        }),
+      );
+      assert.throws(() => loadState(dir), /missing\/invalid partners/);
+      assert.throws(() => status("x", dir), /not a valid cross-backup state/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("should reject partners[] that is an array of the wrong things", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-schema-partners-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir);
+      const file = join(dir, ".exuvia-cross-backup.json");
+      const good = JSON.parse(readFileSync(file, "utf8"));
+      // Array present, entries wrong: holder-ledger style ids, missing share data
+      good.partners = [{ id: "tyto", shareIndex: "4" }, "kiro"];
+      writeFileSync(file, JSON.stringify(good));
+      assert.throws(
+        () => loadState(dir),
+        /partners\[0\]\.shareIndex \(expected number\)/,
+      );
+      assert.throws(() => loadState(dir), /partners\[0\]\.shareHex/);
+      assert.throws(() => loadState(dir), /partners\[1\] \(expected object\)/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("should still load a state written by init()", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-schema-ok-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir);
+      const s = loadState(dir);
+      assert.ok(s);
+      assert.ok(Array.isArray(s.partners));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("cross-backup — init reads the local passphrase back from storage", () => {
+  it("passes when the stored passphrase matches", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-kept-ok-"));
+    const file = join(dir, "lpp.txt");
+    try {
+      writeFileSync(file, "pp-local\n");
+      await init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir, () =>
+        readFileSync(file, "utf8"),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when the passphrase was NEVER stored (the May 2026 case)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-kept-missing-"));
+    const file = join(dir, "lpp.txt"); // deliberately not written
+    try {
+      await assert.rejects(
+        init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir, () =>
+          readFileSync(file, "utf8"),
+        ),
+        /could not be read back/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when an empty passphrase was stored", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-kept-empty-"));
+    try {
+      await assert.rejects(
+        init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir, () => "  \n"),
+        /could not be read back/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when a DIFFERENT passphrase was stored than the one used", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-kept-diff-"));
+    try {
+      await assert.rejects(
+        init(
+          "nyx",
+          ["tyto", "kiro"],
+          "pp-main",
+          "pp-local",
+          dir,
+          () => "pp-typo",
+        ),
+        /cannot be decrypted/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("cross-backup — round-trip decrypt check", () => {
+  it("accepts a state written by init() with the same passphrase", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-rt-ok-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir);
+      assert.doesNotThrow(() =>
+        verifyStateDecrypts(loadState(dir)!, "pp-local"),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects the wrong local passphrase", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-rt-wrong-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir);
+      assert.throws(
+        () => verifyStateDecrypts(loadState(dir)!, "pp-other"),
+        /local share: cannot be decrypted/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a share stored as plaintext (structure looks fine)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-rt-plain-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir);
+      const s = loadState(dir)!;
+      const plain = decryptShare(s.partners[1].shareHex, "pp-local");
+      s.partners[1].shareHex = plain; // valid structure, hash matches plaintext, but not encrypted
+      assert.throws(
+        () => verifyStateDecrypts(s, "pp-local"),
+        /share for kiro: cannot be decrypted/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a share whose hash was tampered", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-rt-hash-"));
+    try {
+      await init("nyx", ["tyto"], "pp-main", "pp-local", dir);
+      const s = loadState(dir)!;
+      s.localShareHash = "0".repeat(64);
+      assert.throws(
+        () => verifyStateDecrypts(s, "pp-local"),
+        /hash does not match/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

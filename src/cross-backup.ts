@@ -74,7 +74,9 @@ const SCRYPT_PARAMS_PROD = {
 };
 const SCRYPT_PARAMS_TEST = { N: 1024, r: 8, p: 1, maxmem: 256 * 1024 * 1024 };
 const SCRYPT_PARAMS =
-  process.env.EXUVIA_TEST_MODE === "1" ? SCRYPT_PARAMS_TEST : SCRYPT_PARAMS_PROD;
+  process.env.EXUVIA_TEST_MODE === "1"
+    ? SCRYPT_PARAMS_TEST
+    : SCRYPT_PARAMS_PROD;
 
 function deriveShareKey(passphrase: string, salt: Buffer): Buffer {
   return scryptSync(passphrase, salt, 32, SCRYPT_PARAMS);
@@ -129,10 +131,62 @@ export function hashShare(shareHex: string): string {
 
 // ── State Management ───────────────────────────────────────────────
 
+/**
+ * Fields every CrossBackupState must have. A file that lacks them was not
+ * written by init()/rotate() (e.g. a hand-written holder ledger) and must be
+ * rejected loudly — otherwise status() crashes deep inside with a TypeError,
+ * or worse, a partial object is treated as a valid backup.
+ */
+const REQUIRED_STATE_FIELDS: Array<[keyof CrossBackupState, string]> = [
+  ["agentId", "string"],
+  ["partners", "array"],
+  ["localShareHex", "string"],
+  ["localShareHash", "string"],
+  ["version", "number"],
+  ["threshold", "number"],
+  ["total", "number"],
+];
+
+const REQUIRED_PARTNER_FIELDS: Array<[keyof Partner, string]> = [
+  ["id", "string"],
+  ["shareIndex", "number"],
+  ["shareHex", "string"],
+  ["shareHash", "string"],
+];
+
+function partnerProblems(p: unknown, i: number): string[] {
+  if (typeof p !== "object" || p === null)
+    return [`partners[${i}] (expected object)`];
+  const rec = p as Record<string, unknown>;
+  return REQUIRED_PARTNER_FIELDS.filter(
+    ([f, kind]) => typeof rec[f] !== kind,
+  ).map(([f, kind]) => `partners[${i}].${String(f)} (expected ${kind})`);
+}
+
 export function loadState(stateDir: string = "."): CrossBackupState | null {
   const path = `${stateDir}/${STATE_FILE}`;
   if (!existsSync(path)) return null;
-  return JSON.parse(readFileSync(path, "utf8"));
+  const raw = JSON.parse(readFileSync(path, "utf8"));
+  const problems: string[] = [];
+  for (const [field, kind] of REQUIRED_STATE_FIELDS) {
+    const v = raw?.[field];
+    const ok = kind === "array" ? Array.isArray(v) : typeof v === kind;
+    if (!ok) problems.push(`${String(field)} (expected ${kind})`);
+  }
+  // Kiro 🐺 (06 Oct): an array of WRONG things proves nothing — check every entry.
+  if (Array.isArray(raw?.partners)) {
+    raw.partners.forEach((p: unknown, i: number) => {
+      problems.push(...partnerProblems(p, i));
+    });
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `${path} is not a valid cross-backup state: missing/invalid ${problems.join(", ")}. ` +
+        `It was probably not written by \`cross-backup init\`. ` +
+        `See docs/LOCAL-SHARE-REINIT.md.`,
+    );
+  }
+  return raw as CrossBackupState;
 }
 
 export function saveState(
@@ -142,6 +196,40 @@ export function saveState(
   state.updatedAt = new Date().toISOString();
   const path = `${stateDir}/${STATE_FILE}`;
   writeFileSync(path, JSON.stringify(state, null, 2));
+}
+
+// ── Round-trip check (Kiro 🐺: only a real decrypt proves the passphrase) ──
+
+/**
+ * Decrypt the local share and every stored partner share with
+ * `localPassphrase` and compare against the stored hashes. Throws with the
+ * first failing share. A structural guard cannot catch a wrong passphrase or
+ * a share that was stored as plaintext — this can.
+ */
+export function verifyStateDecrypts(
+  state: CrossBackupState,
+  localPassphrase: string,
+): void {
+  const check = (label: string, hex: string, hash: string) => {
+    let plain: string;
+    try {
+      plain = decryptShare(hex, localPassphrase);
+    } catch {
+      throw new Error(
+        `${label}: cannot be decrypted with this local passphrase ` +
+          `(wrong passphrase, or stored unencrypted). See docs/LOCAL-SHARE-REINIT.md.`,
+      );
+    }
+    if (hashShare(plain) !== hash) {
+      throw new Error(
+        `${label}: decrypts, but the hash does not match the stored hash.`,
+      );
+    }
+  };
+  check("local share", state.localShareHex, state.localShareHash);
+  for (const p of state.partners) {
+    check(`share for ${p.id}`, p.shareHex, p.shareHash);
+  }
 }
 
 // ── Init ───────────────────────────────────────────────────────────
@@ -154,6 +242,10 @@ export function saveState(
  * @param passphrase - The backup passphrase to split
  * @param localPassphrase - Passphrase to encrypt shares at rest
  * @param stateDir - Directory to store state file
+ * @param loadLocalPassphrase - Optional: reads the local passphrase back from
+ *   wherever it is KEPT (pass, file, ...). If given, the round-trip check uses
+ *   what this returns, not the in-memory argument. That is the only way to
+ *   catch "the passphrase was never stored" — the May 2026 failure (Kiro 🐺).
  */
 export async function init(
   agentId: string,
@@ -161,6 +253,7 @@ export async function init(
   passphrase: string,
   localPassphrase: string,
   stateDir: string = ".",
+  loadLocalPassphrase?: () => string | undefined,
 ): Promise<InitResult> {
   const allHolders = [agentId, ...partnerIds];
   const total = allHolders.length;
@@ -214,6 +307,27 @@ export async function init(
   };
 
   saveState(state, stateDir);
+  // Round-trip through the disk: what we just wrote must decrypt with the
+  // passphrase we were given (May 2026: init ran with a passphrase nobody kept).
+  const onDisk = loadState(stateDir);
+  if (!onDisk) throw new Error("init: state file vanished right after writing");
+  let kept = localPassphrase;
+  if (loadLocalPassphrase) {
+    let loaded: string | undefined;
+    try {
+      loaded = loadLocalPassphrase();
+    } catch (e) {
+      loaded = undefined;
+    }
+    if (!loaded || !loaded.trim()) {
+      throw new Error(
+        "init: the local passphrase could not be read back from where it is kept " +
+          "(not stored?). Store it first, then init. See docs/LOCAL-SHARE-REINIT.md.",
+      );
+    }
+    kept = loaded.trim();
+  }
+  verifyStateDecrypts(onDisk, kept);
 
   return { state, sharesToSend };
 }
@@ -286,9 +400,17 @@ export interface CrossBackupStatus {
   threshold: number;
   total: number;
   localShareOk: boolean;
+  /**
+   * Result of the same full check init runs (verifyStateDecrypts): the local
+   * share AND every stored partner share decrypt with this passphrase and
+   * match their hashes. `null` = all ok, otherwise the first failure label.
+   * (Tyto, 09 Oct: Step 5 promised "all partners", status only checked local.)
+   */
+  allSharesError: string | null;
   partners: Array<{
     id: string;
     hasShare: boolean;
+    shareOk: boolean;
     version: number;
     lastVerified?: string;
     arweaveTxId?: string;
@@ -464,6 +586,21 @@ export function status(
     localShareOk = false;
   }
 
+  // Same full check as init: every stored share must decrypt + match its hash.
+  let allSharesError: string | null = null;
+  try {
+    verifyStateDecrypts(state, localPassphrase);
+  } catch (e) {
+    allSharesError = e instanceof Error ? e.message : String(e);
+  }
+  const partnerOk = (p: { shareHex: string; shareHash: string }): boolean => {
+    try {
+      return hashShare(decryptShare(p.shareHex, localPassphrase)) === p.shareHash;
+    } catch {
+      return false;
+    }
+  };
+
   // Load received shares
   const receivedPath = `${stateDir}/.exuvia-received-shares.json`;
   let received: Record<string, Partner> = {};
@@ -477,9 +614,11 @@ export function status(
     threshold: state.threshold,
     total: state.total,
     localShareOk,
+    allSharesError,
     partners: state.partners.map((p) => ({
       id: p.id,
       hasShare: true,
+      shareOk: partnerOk(p),
       version: p.version,
       lastVerified: p.lastVerified,
       arweaveTxId: p.arweaveTxId,

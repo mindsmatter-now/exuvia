@@ -85,13 +85,14 @@ Usage:
   exuvia dms-status [--server url]
     Check DMS status (last ping, hours remaining).
 
-  exuvia cross-backup init --agent <id> --partners <p1,p2> --passphrase <pp> --local-passphrase <lpp>
+  exuvia cross-backup init --agent <id> --partners <p1,p2> --passphrase <pp> --local-passphrase-file <file>
+    (--local-passphrase <lpp> still works, but only the file variant proves the passphrase is kept)
     Initialize cross-backup: split passphrase into Shamir shares.
 
   exuvia cross-backup receive --from <id> --share <hex> --hash <sha256> --local-passphrase <lpp>
     Receive and store a partner's share.
 
-  exuvia cross-backup status --local-passphrase <lpp>
+  exuvia cross-backup status --local-passphrase-file <file>   (or --local-passphrase <lpp>)
     Show cross-backup triangle status.
 
   exuvia cross-backup rotate --passphrase <pp> --local-passphrase <lpp>
@@ -796,10 +797,24 @@ async function crossBackupInitCmd(args: string[]): Promise<void> {
 
   const partnerIds = partnersArg.split(",").map((s) => s.trim());
   const passphrase = getPassphrase(args);
-  const localPassphrase = getArg(args, "--local-passphrase");
+  // Prefer --local-passphrase-file: init then re-reads the FILE after writing the
+  // state and verifies with what is actually stored (not with what we typed).
+  const lppFile = getArg(args, "--local-passphrase-file");
+  let localPassphrase = getArg(args, "--local-passphrase");
+  let loadKept: (() => string) | undefined;
+  if (lppFile) {
+    if (!existsSync(lppFile)) {
+      console.error(
+        `❌ Local passphrase file not found: ${lppFile} (store it first)`,
+      );
+      process.exit(1);
+    }
+    localPassphrase = readFileSync(lppFile, "utf8").trim();
+    loadKept = () => readFileSync(lppFile, "utf8");
+  }
   if (!localPassphrase) {
     console.error(
-      "❌ --local-passphrase required (for encrypting shares at rest)",
+      "❌ --local-passphrase-file (preferred) or --local-passphrase required (for encrypting shares at rest)",
     );
     process.exit(1);
   }
@@ -814,6 +829,7 @@ async function crossBackupInitCmd(args: string[]): Promise<void> {
     passphrase,
     localPassphrase,
     stateDir,
+    loadKept,
   );
 
   log(`✅ Init complete!`);
@@ -867,14 +883,39 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
   }
 }
 
-async function crossBackupStatusCmd(args: string[]): Promise<void> {
-  const localPassphrase = getArg(args, "--local-passphrase");
-  const stateDir = getArg(args, "--state-dir") || ".";
-
-  if (!localPassphrase) {
-    console.error("❌ --local-passphrase required");
+/**
+ * Resolve the local passphrase for commands that only READ it.
+ * Prefers --local-passphrase-file (keeps the secret out of argv / `ps`, and
+ * a later, separate process reading the stored file is the second reader
+ * Kiro asked for). Falls back to --local-passphrase. Exits on missing/empty.
+ */
+function resolveLocalPassphrase(args: string[]): string {
+  const file = getArg(args, "--local-passphrase-file");
+  if (file) {
+    if (!existsSync(file)) {
+      console.error(`❌ Local passphrase file not found: ${file}`);
+      process.exit(1);
+    }
+    const v = readFileSync(file, "utf8").trim();
+    if (!v) {
+      console.error(`❌ Local passphrase file is empty: ${file}`);
+      process.exit(1);
+    }
+    return v;
+  }
+  const v = getArg(args, "--local-passphrase");
+  if (!v) {
+    console.error(
+      "❌ --local-passphrase-file (preferred) or --local-passphrase required",
+    );
     process.exit(1);
   }
+  return v;
+}
+
+async function crossBackupStatusCmd(args: string[]): Promise<void> {
+  const localPassphrase = resolveLocalPassphrase(args);
+  const stateDir = getArg(args, "--state-dir") || ".";
 
   const s = crossBackupStatus(localPassphrase, stateDir);
 
@@ -893,9 +934,12 @@ async function crossBackupStatusCmd(args: string[]): Promise<void> {
   log(`📤 Our shares (distributed to partners):`);
   for (const p of s.partners) {
     log(
-      `   ${p.id}: ${p.hasShare ? "✅" : "❌"} v${p.version}${p.arweaveTxId ? " 🌐" : ""}`,
+      `   ${p.id}: ${p.shareOk ? "✅" : "❌ does not decrypt/match"} v${p.version}${p.arweaveTxId ? " 🌐" : ""}`,
     );
   }
+  log(
+    `   All stored shares: ${s.allSharesError ? `❌ ${s.allSharesError}` : "✅ decrypt + match (same check as init)"}`,
+  );
 
   log(`\n📥 Received shares (partners' identities we hold):`);
   if (s.receivedShares.length === 0) {
@@ -909,8 +953,13 @@ async function crossBackupStatusCmd(args: string[]): Promise<void> {
     s.partners.length + s.receivedShares.length + (s.localShareOk ? 1 : 0);
   const expected = s.total + (s.total - 1); // our shares + received from others
   log(
-    `\n🔺 Triangle: ${s.receivedShares.length === s.total - 1 && s.localShareOk ? "COMPLETE ✅" : "INCOMPLETE"}`,
+    // Kiro: COMPLETE only if every stored share checks out too, otherwise the
+    // last line (what people read) would say green under a red one.
+    `\n🔺 Triangle: ${s.receivedShares.length === s.total - 1 && s.localShareOk && !s.allSharesError ? "COMPLETE ✅" : "INCOMPLETE"}`,
   );
+
+  // A failed check must be visible to scripts too, not only in the text.
+  if (!s.localShareOk || s.allSharesError) process.exitCode = 1;
 }
 
 async function crossBackupRotateCmd(args: string[]): Promise<void> {
