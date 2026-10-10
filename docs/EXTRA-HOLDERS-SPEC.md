@@ -27,7 +27,7 @@ turns red — and we learn to ignore red. (Tyto, 09 Oct)
 - `🧑 fabian — waits for manual confirmation (Signal, 24 h), last confirmed <date>`
 
 instead of `❌`. A human holder only turns red when the **manual
-confirmation is older than an agreed limit** (to be set, e.g. 90 days) —
+confirmation is older than the agreed limit** (🟡 60 / 🔴 90 days, see *Decided* below) —
 an age check on the confirmation, not on a live answer.
 
 ## Confirmation paths (what counts as "still have it")
