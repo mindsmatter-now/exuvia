@@ -610,6 +610,29 @@ describe("cross-backup — loadState schema guard", () => {
     }
   });
 
+  it("should reject a state without localShareIndex", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-schema-lsi-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir);
+      const file = join(dir, ".exuvia-cross-backup.json");
+      const good = JSON.parse(readFileSync(file, "utf8"));
+      // Prove the manipulation landed: the field existed before we removed it.
+      assert.equal(typeof good.localShareIndex, "number");
+      delete good.localShareIndex;
+      writeFileSync(file, JSON.stringify(good));
+      assert.equal(
+        "localShareIndex" in JSON.parse(readFileSync(file, "utf8")),
+        false,
+      );
+      assert.throws(
+        () => loadState(dir),
+        /localShareIndex \(expected number\)/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("should still load a state written by init()", async () => {
     const dir = mkdtempSync(join(tmpdir(), "xb-schema-ok-"));
     try {
