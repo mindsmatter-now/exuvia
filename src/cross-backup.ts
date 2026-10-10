@@ -142,6 +142,8 @@ const REQUIRED_STATE_FIELDS: Array<[keyof CrossBackupState, string]> = [
   ["partners", "array"],
   ["localShareHex", "string"],
   ["localShareHash", "string"],
+  // Kiro 🐺 (07/08 Oct): without it, status/recovery cannot tell which share is ours.
+  ["localShareIndex", "number"],
   ["version", "number"],
   ["threshold", "number"],
   ["total", "number"],
