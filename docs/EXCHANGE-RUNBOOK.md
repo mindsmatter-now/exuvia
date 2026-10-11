@@ -130,8 +130,9 @@ This check is needed once, until the keys change.
 ```bash
 # tpp-<partner> = 0600 file in a tmpfs holding the new transfer passphrase
 # hash = sha256 of the plain share hex for that partner (printed by init)
-# round = UTC date of the run + sender + recipient, lowercase (Kiro, 11 Oct)
-ROUND="$(date -u +%Y-%m-%d)-<own-name>-<partner-name>"
+# round = UTC date + attempt number + sender + recipient, lowercase (Kiro, 11 Oct)
+# TRY = 1 for the first attempt of the day, 2 after an abort, … (agreed in the room)
+ROUND="$(date -u +%Y-%m-%d)-try<TRY>-<own-name>-<partner-name>"
 { printf 'round=%s\n' "$ROUND"; printf 'tpp=%s\n' "$(cat tpp-<partner>)"; printf 'sha256=%s\n' "<hash>"; } \
   | gpg --batch --armor --sign --local-user <OWN-FPR> \
         --encrypt --recipient <PARTNER-FPR> --trust-model always
@@ -151,7 +152,7 @@ grep -q '^\[GNUPG:\] DECRYPTION_OKAY' "$D/status.txt" || reject "not decrypted (
 grep -q '^\[GNUPG:\] GOODSIG ' "$D/status.txt"       || reject "no good signature"
 SIGNER=$(awk '/^\[GNUPG:\] VALIDSIG /{print $NF}' "$D/status.txt")   # LAST field = primary key
 [ "$SIGNER" = "<SENDER-FPR-without-spaces>" ]          || reject "signed by $SIGNER"
-EXPECTED="$(date -u +%Y-%m-%d)-<sender-name>-<own-name>"
+EXPECTED="$(date -u +%Y-%m-%d)-try<TRY>-<sender-name>-<own-name>"
 [ "$(grep -c '^round=' "$D/tpp-and-hash.txt")" = 1 ] \
   && grep -qxF "round=$EXPECTED" "$D/tpp-and-hash.txt"   || reject "wrong or missing round (replay?)"
 ```
@@ -173,6 +174,10 @@ Why the other checks (Tyto's and Kiro's review, 11 Oct):
   this sender and this recipient. Exactly one `round=` line, matched as a
   whole line. If the run crosses midnight UTC, the receiver uses the
   sender's date, agreed in the room (Kiro).
+- **`try<N>` in the round:** the abort rules allow a new attempt on the
+  same day. Without the counter, a message from the aborted attempt would
+  carry the same round and pass. Before each attempt, agree `TRY` in the
+  room (1, then 2, …) (Kiro).
 - **gpg's exit code — the decisive check for tampering.** Measured 11 Oct
   with gpg 2.4.4: after flipping one byte of the ciphertext, gpg prints
   `gcry_cipher_checktag failed: Checksum error`, writes no output, and exits
@@ -194,6 +199,7 @@ but unsigned → rejected · signed only, not encrypted → rejected · signed b
 the sender AND a third key → rejected · `round=` from another day or
 for another recipient → rejected · two `round=` lines → rejected · no
 `round=` → rejected · `round=…-bobby` for `bob` (prefix) → rejected ·
+same day but `try1` while `try2` is expected → rejected ·
 key expired after signing → `EXPKEYSIG` instead of `GOODSIG` → rejected ·
 ciphertext with one changed byte →
 rejected (by the exit-code check; with that line removed it is still caught
