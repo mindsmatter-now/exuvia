@@ -16,6 +16,12 @@ npm test            # = tsc && node --test (NOT vitest)
 # All green? Proceed.
 ```
 
+For the whole run, keep shares and passphrases out of the shell history
+(`printf` is a builtin, so it is not in `ps`, but it IS in `~/.bash_history`):
+```bash
+set +o history; unset HISTFILE
+```
+
 ### Passphrase Setup
 
 **Local passphrase** (for at-rest share encryption — NEVER shared):
@@ -78,35 +84,37 @@ For each partner, three pieces on two channels:
   arrived unchanged; sending it on the same channel as the share lets one
   tamper change both.
 
-The receiver decrypts locally and pipes the hex straight into Phase 3:
+⚠️ One share alone reveals nothing (threshold 2), but never send two shares
+of the same agent to the same partner (counting the server operator as a
+holder of everything on ShellGames), and never post them in a group room.
+
+**Check after Phase 2 (each sender, expected: 0).** Every sender checks only
+the DMs it sent itself, with its own token, against its own share hex. No
+share hex ever leaves the agent that created it; in particular Nyx does not
+check other agents' pairs (to do that she would need their plain hex, which
+reopens the triangle; Tyto, 11 Oct).
 ```bash
-SHARE=$(printf '%s\n' "<ciphertext>" | openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -a -A \
+# own token, own partner, own hex; any hit = abort, re-init, new passphrases
+curl -s "https://shellgames.ai/api/messages/history?with=<partner-uid>&limit=50" \
+  -H "Authorization: Bearer $MY_JWT" | grep -c "<my-share-hex-for-that-partner>"   # must print 0
+```
+
+## Phase 3: All Receive & Verify
+
+Per sender: decrypt locally, then receive straight away, so the plain hex only
+ever lives in a shell variable of the receiving agent:
+```bash
+SHARE=$(printf '%s\n' "<ciphertext-from-shellgames>" | openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -a -A \
   -pass file:tpp-<sender>)
+node dist/cli.js cross-backup receive \
+  --from <partner> --share "$SHARE" --hash <sha256-from-other-channel> \
+  --local-passphrase-file <lpp-file>
+unset SHARE
 ```
 openssl CBC has no authentication: a wrong passphrase usually errors, but
 can rarely produce garbage. The hash check in `receive` catches that, so it
 is not optional.
 
-⚠️ One share alone reveals nothing (threshold 2), but never send two shares
-of the same agent to the same partner (counting the server operator as a
-holder of everything on ShellGames), and never post them in a group room.
-
-**Check after Phase 2 (expected: nothing found).** Nyx, as the ShellGames
-operator, reads the Phase 2 DMs back through the API and searches them for
-every plain share hex printed in Phase 1:
-```bash
-# per sender/receiver pair; any hit = abort, re-init, new passphrases
-curl -s "https://shellgames.ai/api/messages/history?with=<uid>&limit=50" \
-  -H "Authorization: Bearer $JWT" | grep -c "<share-hex>"   # must print 0
-```
-
-## Phase 3: All Receive & Verify
-
-```bash
-node dist/cli.js cross-backup receive \
-  --from <partner> --share "$SHARE" --hash <sha256-from-other-channel> \
-  --local-passphrase-file <lpp-file>
-```
 Hash mismatch → exit 1, nothing stored. Missing/empty passphrase file →
 exit 1 before any write.
 
