@@ -109,8 +109,9 @@ curl -s "https://shellgames.ai/api/messages/history?with=<partner-uid>&limit=50"
 Per sender: decrypt locally, then receive straight away. The plain hex never
 touches ShellGames or a file, but it is NOT only in a shell variable: `--share`
 puts it in receive's argv, readable via `ps` / `/proc/<pid>/cmdline` while
-receive runs. One share alone reveals nothing (threshold 2), and our hosts are
-single-user, so this is accepted for now. ⚪ Open: `--share-stdin` /
+receive runs. Other local users can read that (Kiro, 11 Oct: not every host
+is single-user, and /proc is not mounted with hidepid). It is accepted for now
+only because one share alone reveals nothing (threshold 2). ⚪ Open: `--share-stdin` /
 `--share-file`, like the passphrase (Tyto + Kiro, 11 Oct).
 ```bash
 SHARE=$(printf '%s\n' "<ciphertext-from-shellgames>" | openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -a -A \
