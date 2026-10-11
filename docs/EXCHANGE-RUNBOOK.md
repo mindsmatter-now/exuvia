@@ -140,24 +140,50 @@ goes to the partner by ShellGames DM, separately from the encrypted share.
 
 **Receiving:**
 ```bash
-gpg --batch --decrypt --status-fd 3 --output tpp-and-hash.txt msg.asc 3>status.txt
-grep -q '^\[GNUPG:\] GOODSIG ' status.txt || { echo "no good signature — reject"; exit 1; }
-SIGNER=$(awk '/^\[GNUPG:\] VALIDSIG /{print $NF}' status.txt)   # LAST field = primary key
-[ "$SIGNER" = "<SENDER-FPR-without-spaces>" ] || { echo "signed by $SIGNER — reject"; exit 1; }
+# D = the tmpfs run dir from Phase 3 (0700), never the repo or home dir
+umask 077
+reject() { shred -u "$D/tpp-and-hash.txt" "$D/status.txt" 2>/dev/null; echo "reject: $1"; exit 1; }
+gpg --batch --decrypt --status-fd 3 --output "$D/tpp-and-hash.txt" msg.asc 3>"$D/status.txt" \
+  || reject "gpg failed (tampered, wrong key, or not for us)"
+grep -q '^\[GNUPG:\] DECRYPTION_OKAY' "$D/status.txt" || reject "not decrypted (signed only?)"
+grep -q '^\[GNUPG:\] GOODSIG ' "$D/status.txt"       || reject "no good signature"
+SIGNER=$(awk '/^\[GNUPG:\] VALIDSIG /{print $NF}' "$D/status.txt")   # LAST field = primary key
+[ "$SIGNER" = "<SENDER-FPR-without-spaces>" ]          || reject "signed by $SIGNER"
 ```
 Compare the **last** field of `VALIDSIG`: that is the primary-key
 fingerprint from the table. The first field is the fingerprint of the key
 that actually signed, which is a *subkey* when the key has a signing subkey
 (tested 11 Oct: then the two differ, and comparing the first field would
-reject a valid message). No `GOODSIG`, or another primary fingerprint →
-reject, nothing is used.
+reject a valid message). Two signatures → `awk` prints two lines → the
+comparison fails → rejected (Tyto).
 
-Tested 11 Oct with throwaway keys in a separate `GNUPGHOME`: signed by the
-expected sender → accepted; signed by a third key → `VALIDSIG` differs,
-rejected; encrypted but unsigned → readable, but no `GOODSIG`, rejected;
-without the recipient's secret key (the server operator's position) →
-cannot be decrypted. Then write the `tpp=` value to a 0600 tmpfs file for Phase 3 and pass
-the `sha256=` value to `receive --hash`.
+Why the other checks (Tyto's review, 11 Oct):
+- **gpg's exit code — the decisive check for tampering.** Measured 11 Oct
+  with gpg 2.4.4: after flipping one byte of the ciphertext, gpg prints
+  `gcry_cipher_checktag failed: Checksum error`, writes no output, and exits
+  with 2, **but the status lines still say `DECRYPTION_OKAY` and `GOODMDC`**.
+  So `DECRYPTION_OKAY` alone does not prove integrity; only the exit code
+  does. In our tests the tampered message was also missing `GOODSIG`, so it
+  would have been rejected anyway, but that is luck, not design.
+- **`DECRYPTION_OKAY`** (needed for a different reason): a message that is only signed (sender forgot
+  `--encrypt`) verifies fine but was readable by everyone on the way,
+  including the server operator. That passphrase is burnt; ask for a new one.
+- **Output in the tmpfs dir, `umask 077`, `shred` on every reject:** an
+  "unsigned but readable" message would otherwise leave a readable file
+  behind.
+
+Tested 11 Oct with throwaway keys in a separate `GNUPGHOME` (keys with a
+signing subkey, like ours), each case through the block above:
+expected sender → accepted · signed by a third key → rejected · encrypted
+but unsigned → rejected · signed only, not encrypted → rejected · signed by
+the sender AND a third key → rejected · ciphertext with one changed byte →
+rejected (by the exit-code check; with that line removed it is still caught
+later by the missing `GOODSIG`) · in every reject case no output file is
+left. The block was extracted from this file and run as is, not retyped. Without the recipient's secret key (the server
+operator's position) the message cannot be decrypted.
+
+Then write the `tpp=` value to a 0600 file in `$D` for Phase 3, pass the
+`sha256=` value to `receive --hash`, and `shred -u` both files afterwards.
 
 What this still does not protect against: a compromised partner host.
 That is the same for every channel and out of scope here.
