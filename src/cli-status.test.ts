@@ -88,6 +88,32 @@ describe("cli — cross-backup status --local-passphrase-file", () => {
     }
   });
 
+  it("RECEIVED share tampered -> exit 1, not COMPLETE (received file was never checked)", async () => {
+    const d = mkdtempSync(join(tmpdir(), "exuvia-cli-rtamper-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pass", "cli-key", d);
+      for (const from of ["tyto", "kiro"]) {
+        const h = `${from}-share-for-nyx`;
+        receiveShare(from, h, hashShare(h), "cli-key", undefined, d);
+      }
+      const ok = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", d]);
+      assert.equal(ok.code, 0, ok.out);
+      assert.match(ok.out, /Triangle: COMPLETE ✅/, "precondition: untampered is COMPLETE");
+      const p = join(d, ".exuvia-received-shares.json");
+      const raw = JSON.parse(readFileSync(p, "utf8"));
+      raw.kiro.shareHash = "0".repeat(64);
+      writeFileSync(p, JSON.stringify(raw));
+      // Proof the manipulation arrived on disk.
+      assert.equal(JSON.parse(readFileSync(p, "utf8")).kiro.shareHash, "0".repeat(64));
+      const r = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", d]);
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, /kiro: ❌/);
+      assert.doesNotMatch(r.out, /Triangle: COMPLETE/);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
   it("right passphrase is not echoed either", () => {
     const r = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", dir]);
     assert.ok(!r.out.includes("cli-key"), "passphrase leaked to output");

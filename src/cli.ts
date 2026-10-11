@@ -946,20 +946,23 @@ async function crossBackupStatusCmd(args: string[]): Promise<void> {
     log(`   (none yet)`);
   }
   for (const r of s.receivedShares) {
-    log(`   ${r.fromId}: ✅ v${r.version}${r.arweaveTxId ? " 🌐" : ""}`);
+    log(
+      `   ${r.fromId}: ${r.shareOk ? "✅" : "❌ does not decrypt/match"} v${r.version}${r.arweaveTxId ? " 🌐" : ""}`,
+    );
   }
 
+  const receivedOk = s.receivedShares.every((r) => r.shareOk);
   const totalShares =
     s.partners.length + s.receivedShares.length + (s.localShareOk ? 1 : 0);
   const expected = s.total + (s.total - 1); // our shares + received from others
   log(
     // Kiro: COMPLETE only if every stored share checks out too, otherwise the
     // last line (what people read) would say green under a red one.
-    `\n🔺 Triangle: ${s.receivedShares.length === s.total - 1 && s.localShareOk && !s.allSharesError ? "COMPLETE ✅" : "INCOMPLETE"}`,
+    `\n🔺 Triangle: ${s.receivedShares.length === s.total - 1 && s.localShareOk && !s.allSharesError && receivedOk ? "COMPLETE ✅" : "INCOMPLETE"}`,
   );
 
   // A failed check must be visible to scripts too, not only in the text.
-  if (!s.localShareOk || s.allSharesError) process.exitCode = 1;
+  if (!s.localShareOk || s.allSharesError || !receivedOk) process.exitCode = 1;
 }
 
 async function crossBackupRotateCmd(args: string[]): Promise<void> {

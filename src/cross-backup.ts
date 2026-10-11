@@ -417,6 +417,7 @@ export interface CrossBackupStatus {
   }>;
   receivedShares: Array<{
     fromId: string;
+    shareOk: boolean;
     version: number;
     lastVerified?: string;
     arweaveTxId?: string;
@@ -623,8 +624,11 @@ export function status(
       lastVerified: p.lastVerified,
       arweaveTxId: p.arweaveTxId,
     })),
+    // Shares we HOLD for partners were listed but never checked, so a
+    // tampered received file still read "COMPLETE". Same decrypt + hash rule.
     receivedShares: Object.values(received).map((r) => ({
       fromId: r.id,
+      shareOk: partnerOk(r),
       version: r.version,
       lastVerified: r.lastVerified,
       arweaveTxId: r.arweaveTxId,
