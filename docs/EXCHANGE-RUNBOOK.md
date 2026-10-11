@@ -130,7 +130,9 @@ This check is needed once, until the keys change.
 ```bash
 # tpp-<partner> = 0600 file in a tmpfs holding the new transfer passphrase
 # hash = sha256 of the plain share hex for that partner (printed by init)
-{ printf 'tpp=%s\n' "$(cat tpp-<partner>)"; printf 'sha256=%s\n' "<hash>"; } \
+# round = UTC date of the run + sender + recipient, lowercase (Kiro, 11 Oct)
+ROUND="$(date -u +%Y-%m-%d)-<own-name>-<partner-name>"
+{ printf 'round=%s\n' "$ROUND"; printf 'tpp=%s\n' "$(cat tpp-<partner>)"; printf 'sha256=%s\n' "<hash>"; } \
   | gpg --batch --armor --sign --local-user <OWN-FPR> \
         --encrypt --recipient <PARTNER-FPR> --trust-model always
 ```
@@ -149,6 +151,9 @@ grep -q '^\[GNUPG:\] DECRYPTION_OKAY' "$D/status.txt" || reject "not decrypted (
 grep -q '^\[GNUPG:\] GOODSIG ' "$D/status.txt"       || reject "no good signature"
 SIGNER=$(awk '/^\[GNUPG:\] VALIDSIG /{print $NF}' "$D/status.txt")   # LAST field = primary key
 [ "$SIGNER" = "<SENDER-FPR-without-spaces>" ]          || reject "signed by $SIGNER"
+EXPECTED="$(date -u +%Y-%m-%d)-<sender-name>-<own-name>"
+[ "$(grep -c '^round=' "$D/tpp-and-hash.txt")" = 1 ] \
+  && grep -qxF "round=$EXPECTED" "$D/tpp-and-hash.txt"   || reject "wrong or missing round (replay?)"
 ```
 Compare the **last** field of `VALIDSIG`: that is the primary-key
 fingerprint from the table. The first field is the fingerprint of the key
@@ -157,7 +162,17 @@ that actually signed, which is a *subkey* when the key has a signing subkey
 reject a valid message). Two signatures → `awk` prints two lines → the
 comparison fails → rejected (Tyto).
 
-Why the other checks (Tyto's review, 11 Oct):
+Why the other checks (Tyto's and Kiro's review, 11 Oct):
+- **Expired or revoked keys are already rejected — keep the `GOODSIG`
+  check exactly like this.** gpg then writes `EXPKEYSIG` / `REVKEYSIG`
+  instead of `GOODSIG`. Do not "simplify" the check to `VALIDSIG` only or to
+  gpg's exit code only (Kiro).
+- **`round=` line (replay):** without it, an old but genuinely signed
+  `tpp`/hash message from a previous rotation, together with the old share,
+  would pass every other check. The round ties the message to today's run,
+  this sender and this recipient. Exactly one `round=` line, matched as a
+  whole line. If the run crosses midnight UTC, the receiver uses the
+  sender's date, agreed in the room (Kiro).
 - **gpg's exit code — the decisive check for tampering.** Measured 11 Oct
   with gpg 2.4.4: after flipping one byte of the ciphertext, gpg prints
   `gcry_cipher_checktag failed: Checksum error`, writes no output, and exits
@@ -176,10 +191,15 @@ Tested 11 Oct with throwaway keys in a separate `GNUPGHOME` (keys with a
 signing subkey, like ours), each case through the block above:
 expected sender → accepted · signed by a third key → rejected · encrypted
 but unsigned → rejected · signed only, not encrypted → rejected · signed by
-the sender AND a third key → rejected · ciphertext with one changed byte →
+the sender AND a third key → rejected · `round=` from another day or
+for another recipient → rejected · two `round=` lines → rejected · no
+`round=` → rejected · `round=…-bobby` for `bob` (prefix) → rejected ·
+key expired after signing → `EXPKEYSIG` instead of `GOODSIG` → rejected ·
+ciphertext with one changed byte →
 rejected (by the exit-code check; with that line removed it is still caught
 later by the missing `GOODSIG`) · in every reject case no output file is
-left. The block was extracted from this file and run as is, not retyped. Without the recipient's secret key (the server
+left. Both blocks (sending and receiving) were extracted from this file and run
+as is, not retyped. Without the recipient's secret key (the server
 operator's position) the message cannot be decrypted.
 
 Then write the `tpp=` value to a 0600 file in `$D` for Phase 3, pass the
