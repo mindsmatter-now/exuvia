@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
-import { init, receiveShare, hashShare } from "./cross-backup.js";
+import { init, receiveShare, hashShare, decryptShare } from "./cross-backup.js";
 
 // Built as CommonJS: __dirname is dist/ next to the compiled cli.js.
 const CLI = join(__dirname, "cli.js");
@@ -46,9 +46,10 @@ describe("cli — cross-backup status --local-passphrase-file", () => {
     assert.match(r.out, /empty/);
   });
 
-  it("right passphrase -> exit 0, local + all shares ok", () => {
+  it("right passphrase, nothing received yet -> exit 2 (not done), local + all shares ok", () => {
     const r = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", dir]);
-    assert.equal(r.code, 0, r.out);
+    assert.equal(r.code, 2, r.out);
+    assert.match(r.out, /Triangle: INCOMPLETE/);
     assert.match(r.out, /Local share: ✅ OK/);
     assert.match(r.out, /All stored shares: ✅/);
   });
@@ -88,8 +89,116 @@ describe("cli — cross-backup status --local-passphrase-file", () => {
     }
   });
 
+  it("RECEIVED share tampered -> exit 1, not COMPLETE (received file was never checked)", async () => {
+    const d = mkdtempSync(join(tmpdir(), "exuvia-cli-rtamper-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pass", "cli-key", d);
+      for (const from of ["tyto", "kiro"]) {
+        const h = `${from}-share-for-nyx`;
+        receiveShare(from, h, hashShare(h), "cli-key", undefined, d);
+      }
+      const ok = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", d]);
+      assert.equal(ok.code, 0, ok.out);
+      assert.match(ok.out, /Triangle: COMPLETE ✅/, "precondition: untampered is COMPLETE");
+      const p = join(d, ".exuvia-received-shares.json");
+      const raw = JSON.parse(readFileSync(p, "utf8"));
+      raw.kiro.shareHash = "0".repeat(64);
+      writeFileSync(p, JSON.stringify(raw));
+      // Proof the manipulation arrived on disk.
+      assert.equal(JSON.parse(readFileSync(p, "utf8")).kiro.shareHash, "0".repeat(64));
+      const r = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", d]);
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, /kiro: ❌/);
+      assert.doesNotMatch(r.out, /Triangle: COMPLETE/);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("share from a NON-partner does not count toward COMPLETE (Kiro, 11 Oct)", async () => {
+    const d = mkdtempSync(join(tmpdir(), "exuvia-cli-stranger-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pass", "cli-key", d);
+      for (const from of ["tyto", "mallory"]) {
+        const h = `${from}-share-for-nyx`;
+        receiveShare(from, h, hashShare(h), "cli-key", undefined, d);
+      }
+      // Proof the setup is what we think: two received shares, one of them not a partner.
+      const raw = JSON.parse(readFileSync(join(d, ".exuvia-received-shares.json"), "utf8"));
+      assert.deepEqual(Object.keys(raw).sort(), ["mallory", "tyto"]);
+      const r = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", d]);
+      assert.equal(r.code, 1, r.out);
+      assert.doesNotMatch(r.out, /Triangle: COMPLETE/, r.out);
+      assert.match(r.out, /not a partner: mallory/);
+      assert.match(r.out, /nothing received yet from: kiro/);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
   it("right passphrase is not echoed either", () => {
     const r = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", dir]);
     assert.ok(!r.out.includes("cli-key"), "passphrase leaked to output");
+  });
+});
+
+function runReceive(args: string[]) {
+  const r = spawnSync(process.execPath, [CLI, "cross-backup", "receive", ...args], {
+    encoding: "utf8",
+    timeout: 20000,
+  });
+  return { code: r.status, out: `${r.stdout}${r.stderr}` };
+}
+
+describe("cli — cross-backup receive --local-passphrase-file", () => {
+  let dir: string;
+  const hex = "tyto-share-for-nyx";
+  const statePath = () => join(dir, ".exuvia-cross-backup.json");
+
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-cli-receive-"));
+    await init("nyx", ["tyto", "kiro"], "pass", "cli-key", dir);
+    writeFileSync(join(dir, "lpp-ok"), "cli-key\n", { mode: 0o600 });
+    writeFileSync(join(dir, "lpp-empty"), "  \n", { mode: 0o600 });
+  });
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("missing file -> exit 1 and state file untouched", () => {
+    const before = readFileSync(statePath(), "utf8");
+    const r = runReceive(["--from", "tyto", "--share", hex, "--hash", hashShare(hex),
+      "--local-passphrase-file", join(dir, "nope"), "--state-dir", dir]);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /not found/);
+    assert.equal(readFileSync(statePath(), "utf8"), before, "state changed on abort");
+  });
+
+  it("empty file -> exit 1 and state file untouched", () => {
+    const before = readFileSync(statePath(), "utf8");
+    const r = runReceive(["--from", "tyto", "--share", hex, "--hash", hashShare(hex),
+      "--local-passphrase-file", join(dir, "lpp-empty"), "--state-dir", dir]);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /empty/);
+    assert.equal(readFileSync(statePath(), "utf8"), before, "state changed on abort");
+  });
+
+  it("file passphrase -> share stored, readable by status, secret not echoed", () => {
+    const r = runReceive(["--from", "tyto", "--share", hex, "--hash", hashShare(hex),
+      "--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", dir]);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /verified and stored/);
+    assert.ok(!r.out.includes("cli-key"), "passphrase leaked to output");
+    // Received shares live in their own file, not in state.partners (those are
+    // the shares we SENT). Check the file receive actually writes, and that the
+    // stored value decrypts with the passphrase from the file.
+    const rec = JSON.parse(readFileSync(join(dir, ".exuvia-received-shares.json"), "utf8"));
+    assert.ok(rec.tyto?.shareHex, "tyto share was not stored");
+    assert.equal(decryptShare(rec.tyto.shareHex, "cli-key"), hex);
+    // A separate process with the same file can decrypt what receive wrote.
+    const s = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", dir]);
+    // Only tyto received so far: readable, but not done -> 2 (Kiro: 0/1/2).
+    assert.equal(s.code, 2, s.out);
+    assert.match(s.out, /nothing received yet from: kiro/);
+    assert.match(s.out, /All stored shares: ✅/);
   });
 });

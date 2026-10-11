@@ -89,7 +89,7 @@ Usage:
     (--local-passphrase <lpp> still works, but only the file variant proves the passphrase is kept)
     Initialize cross-backup: split passphrase into Shamir shares.
 
-  exuvia cross-backup receive --from <id> --share <hex> --hash <sha256> --local-passphrase <lpp>
+  exuvia cross-backup receive --from <id> --share <hex> --hash <sha256> --local-passphrase-file <file>   (or --local-passphrase <lpp>)
     Receive and store a partner's share.
 
   exuvia cross-backup status --local-passphrase-file <file>   (or --local-passphrase <lpp>)
@@ -852,16 +852,16 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
   const fromId = getArg(args, "--from");
   const shareHex = getArg(args, "--share");
   const expectedHash = getArg(args, "--hash");
-  const localPassphrase = getArg(args, "--local-passphrase");
   const arweaveTxId = getArg(args, "--arweave-tx");
   const stateDir = getArg(args, "--state-dir") || ".";
 
-  if (!fromId || !shareHex || !expectedHash || !localPassphrase) {
-    console.error(
-      "❌ --from, --share, --hash, and --local-passphrase required",
-    );
+  if (!fromId || !shareHex || !expectedHash) {
+    console.error("❌ --from, --share and --hash required");
     process.exit(1);
   }
+  // Same rule as status: prefer --local-passphrase-file, exit before any
+  // write if it is missing or empty.
+  const localPassphrase = resolveLocalPassphrase(args);
 
   log(`📥 Receiving share from ${fromId}...`);
   const result = receiveShare(
@@ -946,20 +946,42 @@ async function crossBackupStatusCmd(args: string[]): Promise<void> {
     log(`   (none yet)`);
   }
   for (const r of s.receivedShares) {
-    log(`   ${r.fromId}: ✅ v${r.version}${r.arweaveTxId ? " 🌐" : ""}`);
+    log(
+      `   ${r.fromId}: ${r.shareOk ? "✅" : "❌ does not decrypt/match"} v${r.version}${r.arweaveTxId ? " 🌐" : ""}`,
+    );
   }
 
+  const receivedOk = s.receivedShares.every((r) => r.shareOk);
+  // Kiro, 11 Oct: count WHO we hold shares from, not how many. A share from
+  // "mallory" must not stand in for a missing partner.
+  const partnerIds = new Set(s.partners.map((p) => p.id));
+  const fromIds = new Set(s.receivedShares.map((r) => r.fromId));
+  const strangers = [...fromIds].filter((id) => !partnerIds.has(id));
+  const missing = [...partnerIds].filter((id) => !fromIds.has(id));
+  const fromPartnersOk = strangers.length === 0 && missing.length === 0;
+  if (strangers.length) log(`   ⚠️  not a partner: ${strangers.join(", ")}`);
+  if (missing.length)
+    log(`   ⚠️  nothing received yet from: ${missing.join(", ")}`);
   const totalShares =
     s.partners.length + s.receivedShares.length + (s.localShareOk ? 1 : 0);
   const expected = s.total + (s.total - 1); // our shares + received from others
   log(
     // Kiro: COMPLETE only if every stored share checks out too, otherwise the
     // last line (what people read) would say green under a red one.
-    `\n🔺 Triangle: ${s.receivedShares.length === s.total - 1 && s.localShareOk && !s.allSharesError ? "COMPLETE ✅" : "INCOMPLETE"}`,
+    `\n🔺 Triangle: ${fromPartnersOk && s.localShareOk && !s.allSharesError && receivedOk ? "COMPLETE ✅" : "INCOMPLETE"}`,
   );
 
   // A failed check must be visible to scripts too, not only in the text.
-  if (!s.localShareOk || s.allSharesError) process.exitCode = 1;
+  // Exit codes (Kiro, 11 Oct): 0 = COMPLETE, 1 = broken, 2 = not done yet.
+  // A stranger's share is broken (typo in --from); a missing partner is "not
+  // done yet". 0 for INCOMPLETE would let `status && echo done` read green.
+  const broken =
+    !s.localShareOk ||
+    !!s.allSharesError ||
+    !receivedOk ||
+    strangers.length > 0;
+  if (broken) process.exitCode = 1;
+  else if (!fromPartnersOk) process.exitCode = 2;
 }
 
 async function crossBackupRotateCmd(args: string[]): Promise<void> {
