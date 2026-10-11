@@ -952,17 +952,29 @@ async function crossBackupStatusCmd(args: string[]): Promise<void> {
   }
 
   const receivedOk = s.receivedShares.every((r) => r.shareOk);
+  // Kiro, 11 Oct: count WHO we hold shares from, not how many. A share from
+  // "mallory" must not stand in for a missing partner.
+  const partnerIds = new Set(s.partners.map((p) => p.id));
+  const fromIds = new Set(s.receivedShares.map((r) => r.fromId));
+  const strangers = [...fromIds].filter((id) => !partnerIds.has(id));
+  const missing = [...partnerIds].filter((id) => !fromIds.has(id));
+  const fromPartnersOk = strangers.length === 0 && missing.length === 0;
+  if (strangers.length) log(`   ⚠️  not a partner: ${strangers.join(", ")}`);
+  if (missing.length)
+    log(`   ⚠️  nothing received yet from: ${missing.join(", ")}`);
   const totalShares =
     s.partners.length + s.receivedShares.length + (s.localShareOk ? 1 : 0);
   const expected = s.total + (s.total - 1); // our shares + received from others
   log(
     // Kiro: COMPLETE only if every stored share checks out too, otherwise the
     // last line (what people read) would say green under a red one.
-    `\n🔺 Triangle: ${s.receivedShares.length === s.total - 1 && s.localShareOk && !s.allSharesError && receivedOk ? "COMPLETE ✅" : "INCOMPLETE"}`,
+    `\n🔺 Triangle: ${fromPartnersOk && s.localShareOk && !s.allSharesError && receivedOk ? "COMPLETE ✅" : "INCOMPLETE"}`,
   );
 
   // A failed check must be visible to scripts too, not only in the text.
-  if (!s.localShareOk || s.allSharesError || !receivedOk) process.exitCode = 1;
+  // A stranger's share is an error (typo in --from); a missing partner is just "not done yet".
+  if (!s.localShareOk || s.allSharesError || !receivedOk || strangers.length)
+    process.exitCode = 1;
 }
 
 async function crossBackupRotateCmd(args: string[]): Promise<void> {

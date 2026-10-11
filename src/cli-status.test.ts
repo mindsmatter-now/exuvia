@@ -114,6 +114,27 @@ describe("cli — cross-backup status --local-passphrase-file", () => {
     }
   });
 
+  it("share from a NON-partner does not count toward COMPLETE (Kiro, 11 Oct)", async () => {
+    const d = mkdtempSync(join(tmpdir(), "exuvia-cli-stranger-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "pass", "cli-key", d);
+      for (const from of ["tyto", "mallory"]) {
+        const h = `${from}-share-for-nyx`;
+        receiveShare(from, h, hashShare(h), "cli-key", undefined, d);
+      }
+      // Proof the setup is what we think: two received shares, one of them not a partner.
+      const raw = JSON.parse(readFileSync(join(d, ".exuvia-received-shares.json"), "utf8"));
+      assert.deepEqual(Object.keys(raw).sort(), ["mallory", "tyto"]);
+      const r = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", d]);
+      assert.equal(r.code, 1, r.out);
+      assert.doesNotMatch(r.out, /Triangle: COMPLETE/, r.out);
+      assert.match(r.out, /not a partner: mallory/);
+      assert.match(r.out, /nothing received yet from: kiro/);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
   it("right passphrase is not echoed either", () => {
     const r = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", dir]);
     assert.ok(!r.out.includes("cli-key"), "passphrase leaked to output");
