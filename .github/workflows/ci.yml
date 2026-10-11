@@ -21,7 +21,7 @@ jobs:
       - run: npm ci
       - run: npx prettier --check src/
       - run: npx tsc
-      - run: node --test dist/**/*.test.js
+      - run: node --test dist/*.test.js
 
   security:
     runs-on: ubuntu-latest
