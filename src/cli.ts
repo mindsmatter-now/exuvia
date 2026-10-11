@@ -89,7 +89,7 @@ Usage:
     (--local-passphrase <lpp> still works, but only the file variant proves the passphrase is kept)
     Initialize cross-backup: split passphrase into Shamir shares.
 
-  exuvia cross-backup receive --from <id> --share <hex> --hash <sha256> --local-passphrase <lpp>
+  exuvia cross-backup receive --from <id> --share <hex> --hash <sha256> --local-passphrase-file <file>   (or --local-passphrase <lpp>)
     Receive and store a partner's share.
 
   exuvia cross-backup status --local-passphrase-file <file>   (or --local-passphrase <lpp>)
@@ -852,16 +852,16 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
   const fromId = getArg(args, "--from");
   const shareHex = getArg(args, "--share");
   const expectedHash = getArg(args, "--hash");
-  const localPassphrase = getArg(args, "--local-passphrase");
   const arweaveTxId = getArg(args, "--arweave-tx");
   const stateDir = getArg(args, "--state-dir") || ".";
 
-  if (!fromId || !shareHex || !expectedHash || !localPassphrase) {
-    console.error(
-      "❌ --from, --share, --hash, and --local-passphrase required",
-    );
+  if (!fromId || !shareHex || !expectedHash) {
+    console.error("❌ --from, --share and --hash required");
     process.exit(1);
   }
+  // Same rule as status: prefer --local-passphrase-file, exit before any
+  // write if it is missing or empty.
+  const localPassphrase = resolveLocalPassphrase(args);
 
   log(`📥 Receiving share from ${fromId}...`);
   const result = receiveShare(
