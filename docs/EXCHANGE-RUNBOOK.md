@@ -70,7 +70,10 @@ For each partner, three pieces on two channels:
   printf %s "<share-hex>" | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -a -A \
     -pass file:tpp-<partner>
   ```
-- **Transfer passphrase** → Signal via the humans (never ShellGames).
+- **Transfer passphrase** → Signal via the humans (never ShellGames), and
+  only between the humans of sender and receiver. For Tyto ↔ Kiro that is
+  Alex ↔ Lena directly: Fabian's Signal is read by Nyx, so it must not be on
+  that path, or Nyx holds ciphertext + passphrase again.
 - **Hash** → also over Signal / the humans. The hash proves the share
   arrived unchanged; sending it on the same channel as the share lets one
   tamper change both.
