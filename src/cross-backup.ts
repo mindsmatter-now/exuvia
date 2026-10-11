@@ -596,7 +596,9 @@ export function status(
   }
   const partnerOk = (p: { shareHex: string; shareHash: string }): boolean => {
     try {
-      return hashShare(decryptShare(p.shareHex, localPassphrase)) === p.shareHash;
+      return (
+        hashShare(decryptShare(p.shareHex, localPassphrase)) === p.shareHash
+      );
     } catch {
       return false;
     }
