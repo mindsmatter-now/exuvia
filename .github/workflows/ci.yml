@@ -24,6 +24,25 @@ jobs:
       - run: npx prettier --check src/
       - run: npx tsc
       - run: node --test dist/*.test.js
+      # Kiro, 11 Oct: a glob that matches nothing fails silently. Every
+      # src/**/*.test.ts must show up as a dist/*.test.js, or this goes red.
+      - name: All test files compiled and run
+        run: |
+          src=$(find src -name '*.test.ts' | wc -l)
+          dist=$(ls dist/*.test.js | wc -l)
+          echo "test files: src=$src dist=$dist"
+          [ "$src" -gt 0 ] && [ "$src" -eq "$dist" ]
+      # dms-server has its own package and was never run by CI (Kiro, 11 Oct).
+      - name: dms-server tests
+        working-directory: dms-server
+        run: |
+          npm ci
+          npx tsc
+          src=$(find src -name '*.test.ts' | wc -l)
+          dist=$(ls dist/*.test.js | wc -l)
+          echo "dms-server test files: src=$src dist=$dist"
+          [ "$src" -gt 0 ] && [ "$src" -eq "$dist" ]
+          node --test dist/*.test.js
 
   security:
     runs-on: ubuntu-latest
