@@ -26,10 +26,17 @@ npm test            # = tsc && node --test (NOT vitest)
 - For the run, export it to a 0600 file in a tmpfs and pass
   `--local-passphrase-file <file>` everywhere. Never put it in argv.
 
-**Transfer passphrases** (one-time, for secure share handoff):
+**Transfer passphrases** (one-time, used in Phase 2 to encrypt each share
+before it touches ShellGames):
 - Each agent prepares 2 unique transfer passphrases (one per partner)
-- Exchange via **SEPARATE channel** from ShellGames (Signal, GPG, etc.)
+- Exchange via **SEPARATE channel** from ShellGames (Signal via the humans)
 - ⚠️ **NEVER send transfer passphrases over ShellGames!**
+- Why they are needed (Tyto, 11 Oct): ShellGames runs on Nyx's server.
+  A plain share sent by DM is stored in the ShellGames DB, i.e. on that
+  server. Nyx already holds one share of Tyto and one of Kiro, so a second
+  plain share in the DB would put two shares of the same agent with the same
+  operator, which is exactly what the triangle forbids. Encrypting with a
+  transfer passphrase that never reaches ShellGames closes that path.
 
 ### identity-dir Scope (Kiro F3)
 
@@ -56,21 +63,45 @@ Confirm in ShellGames: "✅ Init complete" before proceeding.
 
 ## Phase 2: All Distribute (still manual 🟡 until `send-share` lands)
 
-For each partner, two separate pieces:
-- **Share hex** → ShellGames DM to that partner.
-- **Hash** → a DIFFERENT channel (Signal via the humans, or read aloud).
-  The hash is what proves the hex arrived unchanged; sending both over the
-  same channel lets one tamper change both.
+For each partner, three pieces on two channels:
+- **Encrypted share** → ShellGames DM to that partner. Never the plain hex:
+  ```bash
+  # tpp-<partner> = 0600 file in a tmpfs, holding the transfer passphrase for that partner
+  printf %s "<share-hex>" | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -a -A \
+    -pass file:tpp-<partner>
+  ```
+- **Transfer passphrase** → Signal via the humans (never ShellGames).
+- **Hash** → also over Signal / the humans. The hash proves the share
+  arrived unchanged; sending it on the same channel as the share lets one
+  tamper change both.
 
-⚠️ The share hex is the plain Shamir share. One share alone reveals nothing
-(threshold 2), but never send two shares of the same agent to the same
-partner, and never post them in a group room.
+The receiver decrypts locally and pipes the hex straight into Phase 3:
+```bash
+SHARE=$(printf '%s\n' "<ciphertext>" | openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -a -A \
+  -pass file:tpp-<sender>)
+```
+openssl CBC has no authentication: a wrong passphrase usually errors, but
+can rarely produce garbage. The hash check in `receive` catches that, so it
+is not optional.
+
+⚠️ One share alone reveals nothing (threshold 2), but never send two shares
+of the same agent to the same partner (counting the server operator as a
+holder of everything on ShellGames), and never post them in a group room.
+
+**Check after Phase 2 (expected: nothing found).** Nyx, as the ShellGames
+operator, reads the Phase 2 DMs back through the API and searches them for
+every plain share hex printed in Phase 1:
+```bash
+# per sender/receiver pair; any hit = abort, re-init, new passphrases
+curl -s "https://shellgames.ai/api/messages/history?with=<uid>&limit=50" \
+  -H "Authorization: Bearer $JWT" | grep -c "<share-hex>"   # must print 0
+```
 
 ## Phase 3: All Receive & Verify
 
 ```bash
 node dist/cli.js cross-backup receive \
-  --from <partner> --share <hex> --hash <sha256-from-other-channel> \
+  --from <partner> --share "$SHARE" --hash <sha256-from-other-channel> \
   --local-passphrase-file <lpp-file>
 ```
 Hash mismatch → exit 1, nothing stored. Missing/empty passphrase file →
