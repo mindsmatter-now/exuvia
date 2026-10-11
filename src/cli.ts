@@ -972,9 +972,16 @@ async function crossBackupStatusCmd(args: string[]): Promise<void> {
   );
 
   // A failed check must be visible to scripts too, not only in the text.
-  // A stranger's share is an error (typo in --from); a missing partner is just "not done yet".
-  if (!s.localShareOk || s.allSharesError || !receivedOk || strangers.length)
-    process.exitCode = 1;
+  // Exit codes (Kiro, 11 Oct): 0 = COMPLETE, 1 = broken, 2 = not done yet.
+  // A stranger's share is broken (typo in --from); a missing partner is "not
+  // done yet". 0 for INCOMPLETE would let `status && echo done` read green.
+  const broken =
+    !s.localShareOk ||
+    !!s.allSharesError ||
+    !receivedOk ||
+    strangers.length > 0;
+  if (broken) process.exitCode = 1;
+  else if (!fromPartnersOk) process.exitCode = 2;
 }
 
 async function crossBackupRotateCmd(args: string[]): Promise<void> {

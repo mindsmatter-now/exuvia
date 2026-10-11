@@ -46,9 +46,10 @@ describe("cli — cross-backup status --local-passphrase-file", () => {
     assert.match(r.out, /empty/);
   });
 
-  it("right passphrase -> exit 0, local + all shares ok", () => {
+  it("right passphrase, nothing received yet -> exit 2 (not done), local + all shares ok", () => {
     const r = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", dir]);
-    assert.equal(r.code, 0, r.out);
+    assert.equal(r.code, 2, r.out);
+    assert.match(r.out, /Triangle: INCOMPLETE/);
     assert.match(r.out, /Local share: ✅ OK/);
     assert.match(r.out, /All stored shares: ✅/);
   });
@@ -195,7 +196,9 @@ describe("cli — cross-backup receive --local-passphrase-file", () => {
     assert.equal(decryptShare(rec.tyto.shareHex, "cli-key"), hex);
     // A separate process with the same file can decrypt what receive wrote.
     const s = runStatus(["--local-passphrase-file", join(dir, "lpp-ok"), "--state-dir", dir]);
-    assert.equal(s.code, 0, s.out);
+    // Only tyto received so far: readable, but not done -> 2 (Kiro: 0/1/2).
+    assert.equal(s.code, 2, s.out);
+    assert.match(s.out, /nothing received yet from: kiro/);
     assert.match(s.out, /All stored shares: ✅/);
   });
 });

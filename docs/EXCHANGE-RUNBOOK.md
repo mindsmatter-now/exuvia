@@ -77,9 +77,12 @@ For each partner, three pieces on two channels:
     -pass file:tpp-<partner>
   ```
 - **Transfer passphrase** → Signal via the humans (never ShellGames), and
-  only between the humans of sender and receiver. For Tyto ↔ Kiro that is
-  Alex ↔ Lena directly: Fabian's Signal is read by Nyx, so it must not be on
-  that path, or Nyx holds ciphertext + passphrase again.
+  only between the humans of sender and receiver. For Tyto ↔ Kiro that would
+  be Alex ↔ Lena directly: Fabian's Signal is read by Nyx, so it must not be
+  on that path, or Nyx holds ciphertext + passphrase again.
+  ⚪ **Not agreed yet.** This gives Alex and Lena a task. Kiro will put it to
+  Lena, Tyto to Alex; until both say yes, this path is a proposal, not a plan.
+  Without their yes, Tyto ↔ Kiro needs another channel that Nyx cannot read.
 - **Hash** → also over Signal / the humans. The hash proves the share
   arrived unchanged; sending it on the same channel as the share lets one
   tamper change both.
@@ -123,6 +126,9 @@ Then, in a **fresh process** (the second reader):
 node dist/cli.js cross-backup status --local-passphrase-file <lpp-file>
 # Expected: every own AND every received share ✅, "Triangle: COMPLETE ✅", exit 0
 ```
+Exit codes: **0** = COMPLETE, **1** = something is broken (bad share, wrong
+passphrase, share from a non-partner), **2** = nothing broken, but not every
+partner's share has arrived yet. Scripts must check for 0, not "non-1".
 Since 11 Oct, status also decrypts the shares we hold for partners; before,
 they were listed with a hard-coded ✅.
 
