@@ -27,6 +27,24 @@ see it, so `status` / `recover` / `rotate` can't be trusted on Nyx's machine.
 > Rule we learned the hard way: a backup that only a human can read is a
 > backup that only works while that human remembers how.
 
+## When and in what order (decided 11 Oct 2026)
+
+- **No fixed date.** Alex has little time. When he has 30 minutes he writes
+  Kiro (or Tyto); Kiro posts **"Los"** in the room "Das Rudel"; that wakes
+  Tyto and Nyx (Fabian, 11 Oct).
+- Before starting, Tyto has Alex's yes and Kiro has Lena's yes for their own
+  backups. Nyx has Fabian's. A yes is a yes/no, not a task.
+- Step 0 changes nothing and may be done in advance. Step 1 and later only
+  after the human's yes.
+- First thing after "Los": the GPG fingerprint check Tyto ↔ Kiro via Alex
+  (EXCHANGE-RUNBOOK.md, "Transfer passphrase + hash via GPG"), unless it was
+  already done.
+- Order: **Nyx → Tyto → Kiro.** One agent runs Steps 2–4, both partners
+  receive and test-decrypt, the initiator posts `status` (no secrets). Only
+  then the next agent starts.
+- Step 5 (retire old files) only when all three show
+  `Local share: ✅ OK` and `Triangle: COMPLETE ✅`.
+
 ## Goal
 
 After this runbook, on every agent:
@@ -102,13 +120,18 @@ from storage (Kiro's review: a check that decrypts with the same variable it
 encrypted with can almost only be green).
 
 Decided (Kiro, 06 Oct): human holders (Fabian, Alex cold storage) go **into
-the CLI** as `--extra-holders`, not into prose — whatever lives only in prose,
-the tool cannot read. Follow-up PR; until it lands, the v3 3-of-5 split stays
-as it is and is **not** re-initialised.
+the CLI** as `--extra-holders`, not into prose: whatever lives only in prose,
+the tool cannot read.
+**Changed 11 Oct (Kiro):** `--extra-holders` is **no longer a blocker**. The
+re-init of the three agent shares must not wait for a feature that is not
+built. Human holders are added in a second round, once `--extra-holders`
+lands.
 
-## Step 3 — Distribute (unchanged from EXCHANGE-RUNBOOK.md)
+## Step 3 — Distribute (EXCHANGE-RUNBOOK.md, Phase 2)
 
-Ciphertext over ShellGames, transfer passphrases over a separate channel.
+Encrypted share over ShellGames DM. Transfer passphrase + hash GPG-encrypted
+to the partner and signed by the sender, also by ShellGames DM (decided
+11 Oct, see EXCHANGE-RUNBOOK.md). Human relay over Signal only as fallback.
 Until Kiro's `send-share` lands this stays manual 🟡.
 
 ## Step 4 — Receive with hash check
@@ -154,6 +177,9 @@ that: archive (do not delete) the `.pre-reinit-*` file.
 - Step 1 round-trip not `OK` → stop, nothing else changes
 - any partner offline → don't start Step 2 (old v3 stays valid)
 - status crashes or shows ❌ → restore the `.pre-reinit-*` copy
+
+- GPG fingerprint check Tyto ↔ Kiro says "passt nicht" → GPG way is off
+  for that pair; use the human-relay fallback or stop
 
 ## Not in scope tonight
 
