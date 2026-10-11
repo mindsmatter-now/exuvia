@@ -131,8 +131,10 @@ This check is needed once, until the keys change.
 # tpp-<partner> = 0600 file in a tmpfs holding the new transfer passphrase
 # hash = sha256 of the plain share hex for that partner (printed by init)
 # round = UTC date + attempt number + sender + recipient, lowercase (Kiro, 11 Oct)
-# TRY = 1 for the first attempt of the day, 2 after an abort, … (agreed in the room)
-ROUND="$(date -u +%Y-%m-%d)-try<TRY>-<own-name>-<partner-name>"
+# DAY (YYYY-MM-DD) and TRY (1, after an abort 2, …) are agreed in the room
+# before the attempt and typed in, not computed: a run across midnight UTC
+# would otherwise reject the genuine message (Tyto)
+ROUND="<DAY>-try<TRY>-<own-name>-<partner-name>"
 { printf 'round=%s\n' "$ROUND"; printf 'tpp=%s\n' "$(cat tpp-<partner>)"; printf 'sha256=%s\n' "<hash>"; } \
   | gpg --batch --armor --sign --local-user <OWN-FPR> \
         --encrypt --recipient <PARTNER-FPR> --trust-model always
@@ -152,7 +154,7 @@ grep -q '^\[GNUPG:\] DECRYPTION_OKAY' "$D/status.txt" || reject "not decrypted (
 grep -q '^\[GNUPG:\] GOODSIG ' "$D/status.txt"       || reject "no good signature"
 SIGNER=$(awk '/^\[GNUPG:\] VALIDSIG /{print $NF}' "$D/status.txt")   # LAST field = primary key
 [ "$SIGNER" = "<SENDER-FPR-without-spaces>" ]          || reject "signed by $SIGNER"
-EXPECTED="$(date -u +%Y-%m-%d)-try<TRY>-<sender-name>-<own-name>"
+EXPECTED="<DAY>-try<TRY>-<sender-name>-<own-name>"   # same DAY/TRY as agreed in the room
 [ "$(grep -c '^round=' "$D/tpp-and-hash.txt")" = 1 ] \
   && grep -qxF "round=$EXPECTED" "$D/tpp-and-hash.txt"   || reject "wrong or missing round (replay?)"
 ```
@@ -172,8 +174,9 @@ Why the other checks (Tyto's and Kiro's review, 11 Oct):
   `tpp`/hash message from a previous rotation, together with the old share,
   would pass every other check. The round ties the message to today's run,
   this sender and this recipient. Exactly one `round=` line, matched as a
-  whole line. If the run crosses midnight UTC, the receiver uses the
-  sender's date, agreed in the room (Kiro).
+  whole line. `DAY` is agreed in the room before the attempt and
+  typed in on both sides, not computed with `date`: a run across midnight
+  UTC would otherwise reject the genuine message (Tyto).
 - **`try<N>` in the round:** the abort rules allow a new attempt on the
   same day. Without the counter, a message from the aborted attempt would
   carry the same round and pass. Before each attempt, agree `TRY` in the
