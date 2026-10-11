@@ -275,18 +275,23 @@ describe("cross-backup — status", () => {
   it("turns red when a PARTNER share is tampered, even if the local share is fine", () => {
     const dir = mkdtempSync(join(tmpdir(), "exuvia-cb-status-tamper-"));
     try {
-      return init("nyx", ["tyto", "kiro"], "pass", "k", dir).then(() => {
-        const path = join(dir, ".exuvia-cross-backup.json");
-        const raw = JSON.parse(readFileSync(path, "utf8"));
-        raw.partners[1].shareHash = "0".repeat(64); // kiro's hash no longer matches
-        writeFileSync(path, JSON.stringify(raw));
-        const s = status("k", dir);
-        assert.ok(s);
-        assert.equal(s!.localShareOk, true, "local share is untouched");
-        assert.match(String(s!.allSharesError), /share for kiro/);
-        assert.equal(s!.partners.find((p) => p.id === "kiro")!.shareOk, false);
-        assert.equal(s!.partners.find((p) => p.id === "tyto")!.shareOk, true);
-      }).finally(() => rmSync(dir, { recursive: true, force: true }));
+      return init("nyx", ["tyto", "kiro"], "pass", "k", dir)
+        .then(() => {
+          const path = join(dir, ".exuvia-cross-backup.json");
+          const raw = JSON.parse(readFileSync(path, "utf8"));
+          raw.partners[1].shareHash = "0".repeat(64); // kiro's hash no longer matches
+          writeFileSync(path, JSON.stringify(raw));
+          const s = status("k", dir);
+          assert.ok(s);
+          assert.equal(s!.localShareOk, true, "local share is untouched");
+          assert.match(String(s!.allSharesError), /share for kiro/);
+          assert.equal(
+            s!.partners.find((p) => p.id === "kiro")!.shareOk,
+            false,
+          );
+          assert.equal(s!.partners.find((p) => p.id === "tyto")!.shareOk, true);
+        })
+        .finally(() => rmSync(dir, { recursive: true, force: true }));
     } catch (e) {
       rmSync(dir, { recursive: true, force: true });
       throw e;
