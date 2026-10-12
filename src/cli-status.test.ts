@@ -321,3 +321,80 @@ describe("cli — cross-backup receive --local-passphrase-file", () => {
     assert.match(s.out, /All stored shares: ✅/);
   });
 });
+
+function runRotate(args: string[]) {
+  const r = spawnSync(
+    process.execPath,
+    [CLI, "cross-backup", "rotate", ...args],
+    {
+      encoding: "utf8",
+      timeout: 20000,
+    },
+  );
+  return { code: r.status, out: `${r.stdout}${r.stderr}` };
+}
+
+// Kiro, 11 Oct: rotate took the local passphrase only via argv.
+describe("cli — cross-backup rotate --local-passphrase-file", () => {
+  let dir: string;
+  const statePath = () => join(dir, ".exuvia-cross-backup.json");
+
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-cli-rotate-"));
+    await init("nyx", ["tyto", "kiro"], "pass", "cli-key", dir);
+    writeFileSync(join(dir, "lpp-ok"), "cli-key\n", { mode: 0o600 });
+    writeFileSync(join(dir, "lpp-empty"), "  \n", { mode: 0o600 });
+    writeFileSync(join(dir, "pp"), "pass\n", { mode: 0o600 });
+  });
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  for (const [name, file, msg] of [
+    ["missing", "nope", /not found/],
+    ["empty", "lpp-empty", /empty/],
+  ] as const) {
+    it(`${name} file -> exit 1 and state file untouched`, () => {
+      const before = readFileSync(statePath(), "utf8");
+      const r = runRotate([
+        "--passphrase-file",
+        join(dir, "pp"),
+        "--local-passphrase-file",
+        join(dir, file),
+        "--state-dir",
+        dir,
+      ]);
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, msg);
+      assert.equal(
+        readFileSync(statePath(), "utf8"),
+        before,
+        "state changed on abort",
+      );
+    });
+  }
+
+  it("file passphrase -> version bumped, new shares encrypted with the STORED passphrase, secret not echoed", () => {
+    const v0 = JSON.parse(readFileSync(statePath(), "utf8"));
+    const r = runRotate([
+      "--passphrase-file",
+      join(dir, "pp"),
+      "--local-passphrase-file",
+      join(dir, "lpp-ok"),
+      "--state-dir",
+      dir,
+    ]);
+    assert.equal(r.code, 0, r.out);
+    const v1 = JSON.parse(readFileSync(statePath(), "utf8"));
+    // the manipulation must have arrived: the state really changed
+    assert.equal(v1.version, v0.version + 1);
+    assert.notEqual(v1.localShareHex, v0.localShareHex);
+    assert.equal(
+      hashShare(decryptShare(v1.localShareHex, "cli-key")),
+      v1.localShareHash,
+    );
+    for (const p of v1.partners) {
+      assert.equal(hashShare(decryptShare(p.shareHex, "cli-key")), p.shareHash);
+    }
+    assert.ok(!r.out.includes("cli-key"), "local passphrase leaked to output");
+  });
+});

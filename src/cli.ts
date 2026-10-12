@@ -95,7 +95,7 @@ Usage:
   exuvia cross-backup status --local-passphrase-file <file>   (or --local-passphrase <lpp>)
     Show cross-backup triangle status.
 
-  exuvia cross-backup rotate --passphrase <pp> --local-passphrase <lpp>
+  exuvia cross-backup rotate --passphrase <pp> --local-passphrase-file <file>   (or --local-passphrase <lpp>)
     Rotate shares (re-split with new Shamir).
 
   exuvia cross-backup recover --agent <id> --local-passphrase <lpp> --shares <hex1,hex2>
@@ -985,14 +985,12 @@ async function crossBackupStatusCmd(args: string[]): Promise<void> {
 }
 
 async function crossBackupRotateCmd(args: string[]): Promise<void> {
+  // Same rule as receive/status (Kiro, 11 Oct): prefer --local-passphrase-file
+  // so the secret stays out of argv / `ps`; exit before any write if the file
+  // is missing or empty.
+  const localPassphrase = resolveLocalPassphrase(args);
   const passphrase = getPassphrase(args);
-  const localPassphrase = getArg(args, "--local-passphrase");
   const stateDir = getArg(args, "--state-dir") || ".";
-
-  if (!localPassphrase) {
-    console.error("❌ --local-passphrase required");
-    process.exit(1);
-  }
 
   log(`🔄 Rotating cross-backup shares...\n`);
   const result = await crossBackupRotate(passphrase, localPassphrase, stateDir);
