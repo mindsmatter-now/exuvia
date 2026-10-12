@@ -400,7 +400,11 @@ describe("cli — cross-backup rotate --local-passphrase-file", () => {
       // Kiro, 12 Oct: the partner shares must be new too, not just the local one.
       const old = v0.partners.find((o: { id: string }) => o.id === p.id);
       assert.ok(old, `partner ${p.id} missing before rotate`);
-      assert.notEqual(p.shareHash, old.shareHash, `partner ${p.id} share not rotated`);
+      assert.notEqual(
+        p.shareHash,
+        old.shareHash,
+        `partner ${p.id} share not rotated`,
+      );
     }
     assert.ok(!r.out.includes("cli-key"), "local passphrase leaked to output");
   });
