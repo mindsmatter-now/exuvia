@@ -287,9 +287,18 @@ Kiro: 🐺 ✅ Triangle complete
 - Close GitHub Issue #6
 - Update memory/projects/exuvia.md
 - Discord #nyx-log
-- Schedule rotation test (30 days). ⚪ Before that: `rotate` still takes the
-  local passphrase only via argv; it needs `--local-passphrase-file` like
-  receive got in #9 (Kiro, 11 Oct).
+- Schedule rotation test (30 days). `rotate` reads `--local-passphrase-file`
+  (#13) and refuses a local passphrase that does not decrypt the stored local
+  share (exit 1, state untouched; Tyto, 12 Oct).
+- ⚪ **Only rotate when all three are live, and back up the state first.**
+  `rotate` overwrites the local share BEFORE the partners have the new ones.
+  If distribution breaks off, you hold version N+1 and the partners hold N,
+  and the two do not fit together (Tyto, 12 Oct).
+- ⚪ `rotate` does not check that `--passphrase` is the real identity
+  passphrase. With a wrong one it cleanly splits a wrong secret, and the
+  backup is unrecoverable despite three valid shares. Needs a check against
+  the blob (probe decrypt) or a stored hash. Probably the most dangerous spot
+  in the tool (Tyto, 12 Oct). Open.
 - Discard all transfer passphrases
 
 ---
