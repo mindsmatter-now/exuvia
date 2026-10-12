@@ -454,6 +454,24 @@ export async function rotate(
     throw new Error("No cross-backup state found. Run init first.");
   }
 
+  // Tyto, 12 Oct: the local passphrase must be the STORED one. Without this
+  // check a typo or the wrong tmpfs file re-encrypts the whole state under a
+  // passphrase nobody knows — exit 0, version +1, "Rotation complete".
+  // Same rule as init (which reads back what it wrote): prove before writing.
+  let storedOk = false;
+  try {
+    storedOk =
+      hashShare(decryptShare(state.localShareHex, localPassphrase)) ===
+      state.localShareHash;
+  } catch {
+    storedOk = false;
+  }
+  if (!storedOk) {
+    throw new Error(
+      "Local passphrase does not match the stored state (cannot decrypt the local share). Nothing was changed.",
+    );
+  }
+
   const partnerIds = state.partners.map((p) => p.id);
   const allHolders = [state.agentId, ...partnerIds];
   const threshold = state.threshold;

@@ -345,6 +345,7 @@ describe("cli — cross-backup rotate --local-passphrase-file", () => {
     writeFileSync(join(dir, "lpp-ok"), "cli-key\n", { mode: 0o600 });
     writeFileSync(join(dir, "lpp-empty"), "  \n", { mode: 0o600 });
     writeFileSync(join(dir, "pp"), "pass\n", { mode: 0o600 });
+    writeFileSync(join(dir, "lpp-wrong"), "cli-kez\n", { mode: 0o600 });
   });
 
   after(() => rmSync(dir, { recursive: true, force: true }));
@@ -352,6 +353,8 @@ describe("cli — cross-backup rotate --local-passphrase-file", () => {
   for (const [name, file, msg] of [
     ["missing", "nope", /not found/],
     ["empty", "lpp-empty", /empty/],
+    // Tyto, 12 Oct: a readable file with the WRONG passphrase must not rotate.
+    ["wrong", "lpp-wrong", /does not match the stored state/],
   ] as const) {
     it(`${name} file -> exit 1 and state file untouched`, () => {
       const before = readFileSync(statePath(), "utf8");
@@ -373,7 +376,7 @@ describe("cli — cross-backup rotate --local-passphrase-file", () => {
     });
   }
 
-  it("file passphrase -> version bumped, new shares encrypted with the STORED passphrase, secret not echoed", () => {
+  it("correct file -> version bumped, new shares encrypted with the stored passphrase (wrong file is rejected above), secret not echoed", () => {
     const v0 = JSON.parse(readFileSync(statePath(), "utf8"));
     const r = runRotate([
       "--passphrase-file",
