@@ -470,6 +470,61 @@ describe("cross-backup — rotate", () => {
   });
 });
 
+describe("cross-backup — rotate round-trip (Tyto 12 Oct)", () => {
+  it("checks every threshold subset: 2-of-3 = 3 pairs, 3-of-5 = 10", async () => {
+    const { verifyThresholdSubsets } = await import("./cross-backup.js");
+    const { splitPassphrase } = await import("./shamir.js");
+    const a = await splitPassphrase("RoundTrip!", ["a", "b", "c"], 2);
+    assert.equal(await verifyThresholdSubsets(a.shares, 2, "RoundTrip!"), 3);
+    const b = await splitPassphrase("RoundTrip!", ["a", "b", "c", "d", "e"], 3);
+    assert.equal(await verifyThresholdSubsets(b.shares, 3, "RoundTrip!"), 10);
+  });
+
+  it("rejects when one share is corrupted", async () => {
+    const { verifyThresholdSubsets } = await import("./cross-backup.js");
+    const { splitPassphrase } = await import("./shamir.js");
+    const a = await splitPassphrase("RoundTrip!", ["a", "b", "c"], 2);
+    const before = a.shares[2][3];
+    a.shares[2][3] ^= 0xff;
+    assert.notEqual(a.shares[2][3], before, "the corruption must have landed");
+    await assert.rejects(
+      () => verifyThresholdSubsets(a.shares, 2, "RoundTrip!"),
+      /do not reconstruct/,
+    );
+  });
+
+  it("rotate with a corrupted fresh share throws and leaves the state byte-identical", async () => {
+    const { rotate, ROTATE_TEST_HOOK } = await import("./cross-backup.js");
+    const { createHash } = await import("crypto");
+    const dir = mkdtempSync(join(tmpdir(), "exuvia-rot-rt-"));
+    await init("nyx", ["tyto", "kiro"], "RoundTrip!", "key", dir);
+    const file = join(dir, ".exuvia-cross-backup.json");
+    const sha = () =>
+      createHash("sha256").update(readFileSync(file)).digest("hex");
+    const before = sha();
+    let landed = false;
+    ROTATE_TEST_HOOK.afterSplit = (shares) => {
+      shares[1][4] ^= 0xff;
+      landed = true;
+    };
+    try {
+      await assert.rejects(
+        () => rotate("RoundTrip!", "key", dir),
+        /do not reconstruct/,
+      );
+    } finally {
+      ROTATE_TEST_HOOK.afterSplit = undefined;
+    }
+    assert.ok(landed, "the hook must have corrupted a share");
+    assert.equal(sha(), before, "state file must be unchanged");
+    // and without the hook the same rotate goes through
+    const ok = await rotate("RoundTrip!", "key", dir);
+    assert.equal(ok.newVersion, 2);
+    assert.notEqual(sha(), before);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe("cross-backup — recover", () => {
   let tmpCoordinator: string;
   let tmpHelper: string;

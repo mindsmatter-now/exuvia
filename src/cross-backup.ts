@@ -202,6 +202,48 @@ export function saveState(
 
 // ── Round-trip check (Kiro 🐺: only a real decrypt proves the passphrase) ──
 
+/** Test seam only: lets the rotate red-test corrupt a fresh share in memory. */
+export const ROTATE_TEST_HOOK: {
+  afterSplit?: (shares: Uint8Array[]) => void;
+} = {};
+
+/** All k-sized index subsets of 0..n-1 (n is tiny: holders, not data). */
+function subsets(n: number, k: number): number[][] {
+  const out: number[][] = [];
+  const pick = (start: number, cur: number[]) => {
+    if (cur.length === k) return void out.push([...cur]);
+    for (let i = start; i < n; i++) pick(i + 1, [...cur, i]);
+  };
+  pick(0, []);
+  return out;
+}
+
+/**
+ * Every threshold-sized subset of `shares` must combine to `passphrase`.
+ * Throws naming the first failing subset. Used by rotate before it writes.
+ */
+export async function verifyThresholdSubsets(
+  shares: Uint8Array[],
+  threshold: number,
+  passphrase: string,
+): Promise<number> {
+  const sets = subsets(shares.length, threshold);
+  for (const set of sets) {
+    let got: string | null = null;
+    try {
+      got = await combineShares(set.map((i) => shares[i]));
+    } catch {
+      got = null;
+    }
+    if (got !== passphrase) {
+      throw new Error(
+        `Rotation aborted: shares [${set.join(", ")}] do not reconstruct the passphrase. Nothing was changed.`,
+      );
+    }
+  }
+  return sets.length;
+}
+
 /**
  * Decrypt the local share and every stored partner share with
  * `localPassphrase` and compare against the stored hashes. Throws with the
@@ -480,6 +522,12 @@ export async function rotate(
 
   // Re-split passphrase with same structure
   const shamir = await splitPassphrase(passphrase, allHolders, threshold);
+  ROTATE_TEST_HOOK.afterSplit?.(shamir.shares);
+
+  // Tyto, 12 Oct: prove the new shares BEFORE anything is written. Every
+  // threshold-sized subset must reconstruct exactly this passphrase. A broken
+  // share would otherwise only show up on recovery day — when it is too late.
+  await verifyThresholdSubsets(shamir.shares, threshold, passphrase);
 
   // Update local share
   const localShareHex = shareToHex(shamir.shares[0]);
@@ -510,6 +558,10 @@ export async function rotate(
       hash: partnerShareHash,
     });
   }
+
+  // Same check init runs after writing, here before: every stored share must
+  // decrypt with the local passphrase and match its hash.
+  verifyStateDecrypts(state, localPassphrase);
 
   saveState(state, stateDir);
 
