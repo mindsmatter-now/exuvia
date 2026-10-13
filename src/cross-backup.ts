@@ -203,6 +203,53 @@ export function saveState(
 // ── Round-trip check (Kiro 🐺: only a real decrypt proves the passphrase) ──
 
 /**
+ * Optional dependencies for rotate (Kiro 🐺, review #15): passed per call, so
+ * there is no shared mutable hook that tests could leak into each other and
+ * nothing exported that sees fresh shares. Defaults are the real functions.
+ */
+export interface RotateOptions {
+  split?: typeof splitPassphrase;
+  encrypt?: typeof encryptShare;
+}
+
+/** All k-sized index subsets of 0..n-1 (n is tiny: holders, not data). */
+function subsets(n: number, k: number): number[][] {
+  const out: number[][] = [];
+  const pick = (start: number, cur: number[]) => {
+    if (cur.length === k) return void out.push([...cur]);
+    for (let i = start; i < n; i++) pick(i + 1, [...cur, i]);
+  };
+  pick(0, []);
+  return out;
+}
+
+/**
+ * Every threshold-sized subset of `shares` must combine to `passphrase`.
+ * Throws naming the first failing subset. Used by rotate before it writes.
+ */
+export async function verifyThresholdSubsets(
+  shares: Uint8Array[],
+  threshold: number,
+  passphrase: string,
+): Promise<number> {
+  const sets = subsets(shares.length, threshold);
+  for (const set of sets) {
+    let got: string | null = null;
+    try {
+      got = await combineShares(set.map((i) => shares[i]));
+    } catch {
+      got = null;
+    }
+    if (got !== passphrase) {
+      throw new Error(
+        `Rotation aborted: shares [${set.join(", ")}] do not reconstruct the passphrase. Nothing was changed.`,
+      );
+    }
+  }
+  return sets.length;
+}
+
+/**
  * Decrypt the local share and every stored partner share with
  * `localPassphrase` and compare against the stored hashes. Throws with the
  * first failing share. A structural guard cannot catch a wrong passphrase or
@@ -445,12 +492,16 @@ export interface RotateResult {
  * @param passphrase - The backup passphrase to re-split
  * @param localPassphrase - Passphrase to encrypt shares at rest
  * @param stateDir - Directory with state file
+ * @param opts - Optional split/encrypt replacements (tests inject faults here)
  */
 export async function rotate(
   passphrase: string,
   localPassphrase: string,
   stateDir: string = ".",
+  opts: RotateOptions = {},
 ): Promise<RotateResult> {
+  const split = opts.split ?? splitPassphrase;
+  const encrypt = opts.encrypt ?? encryptShare;
   const state = loadState(stateDir);
   if (!state) {
     throw new Error("No cross-backup state found. Run init first.");
@@ -479,12 +530,17 @@ export async function rotate(
   const threshold = state.threshold;
 
   // Re-split passphrase with same structure
-  const shamir = await splitPassphrase(passphrase, allHolders, threshold);
+  const shamir = await split(passphrase, allHolders, threshold);
+
+  // Tyto, 12 Oct: prove the new shares BEFORE anything is written. Every
+  // threshold-sized subset must reconstruct exactly this passphrase. A broken
+  // share would otherwise only show up on recovery day — when it is too late.
+  await verifyThresholdSubsets(shamir.shares, threshold, passphrase);
 
   // Update local share
   const localShareHex = shareToHex(shamir.shares[0]);
   const localShareHash = hashShare(localShareHex);
-  state.localShareHex = encryptShare(localShareHex, localPassphrase);
+  state.localShareHex = encrypt(localShareHex, localPassphrase);
   state.localShareHash = localShareHash;
   state.version += 1;
 
@@ -499,7 +555,7 @@ export async function rotate(
     // Update partner entry
     state.partners[i] = {
       ...state.partners[i],
-      shareHex: encryptShare(partnerShareHex, localPassphrase),
+      shareHex: encrypt(partnerShareHex, localPassphrase),
       shareHash: partnerShareHash,
       version: state.version,
       lastVerified: undefined, // needs re-verification after rotation
@@ -510,6 +566,10 @@ export async function rotate(
       hash: partnerShareHash,
     });
   }
+
+  // Same check init runs after writing, here before: every stored share must
+  // decrypt with the local passphrase and match its hash.
+  verifyStateDecrypts(state, localPassphrase);
 
   saveState(state, stateDir);
 
