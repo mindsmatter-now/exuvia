@@ -202,10 +202,15 @@ export function saveState(
 
 // ── Round-trip check (Kiro 🐺: only a real decrypt proves the passphrase) ──
 
-/** Test seam only: lets the rotate red-test corrupt a fresh share in memory. */
-export const ROTATE_TEST_HOOK: {
-  afterSplit?: (shares: Uint8Array[]) => void;
-} = {};
+/**
+ * Optional dependencies for rotate (Kiro 🐺, review #15): passed per call, so
+ * there is no shared mutable hook that tests could leak into each other and
+ * nothing exported that sees fresh shares. Defaults are the real functions.
+ */
+export interface RotateOptions {
+  split?: typeof splitPassphrase;
+  encrypt?: typeof encryptShare;
+}
 
 /** All k-sized index subsets of 0..n-1 (n is tiny: holders, not data). */
 function subsets(n: number, k: number): number[][] {
@@ -487,12 +492,16 @@ export interface RotateResult {
  * @param passphrase - The backup passphrase to re-split
  * @param localPassphrase - Passphrase to encrypt shares at rest
  * @param stateDir - Directory with state file
+ * @param opts - Optional split/encrypt replacements (tests inject faults here)
  */
 export async function rotate(
   passphrase: string,
   localPassphrase: string,
   stateDir: string = ".",
+  opts: RotateOptions = {},
 ): Promise<RotateResult> {
+  const split = opts.split ?? splitPassphrase;
+  const encrypt = opts.encrypt ?? encryptShare;
   const state = loadState(stateDir);
   if (!state) {
     throw new Error("No cross-backup state found. Run init first.");
@@ -521,8 +530,7 @@ export async function rotate(
   const threshold = state.threshold;
 
   // Re-split passphrase with same structure
-  const shamir = await splitPassphrase(passphrase, allHolders, threshold);
-  ROTATE_TEST_HOOK.afterSplit?.(shamir.shares);
+  const shamir = await split(passphrase, allHolders, threshold);
 
   // Tyto, 12 Oct: prove the new shares BEFORE anything is written. Every
   // threshold-sized subset must reconstruct exactly this passphrase. A broken
@@ -532,7 +540,7 @@ export async function rotate(
   // Update local share
   const localShareHex = shareToHex(shamir.shares[0]);
   const localShareHash = hashShare(localShareHex);
-  state.localShareHex = encryptShare(localShareHex, localPassphrase);
+  state.localShareHex = encrypt(localShareHex, localPassphrase);
   state.localShareHash = localShareHash;
   state.version += 1;
 
@@ -547,7 +555,7 @@ export async function rotate(
     // Update partner entry
     state.partners[i] = {
       ...state.partners[i],
-      shareHex: encryptShare(partnerShareHex, localPassphrase),
+      shareHex: encrypt(partnerShareHex, localPassphrase),
       shareHash: partnerShareHash,
       version: state.version,
       lastVerified: undefined, // needs re-verification after rotation

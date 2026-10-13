@@ -494,7 +494,8 @@ describe("cross-backup — rotate round-trip (Tyto 12 Oct)", () => {
   });
 
   it("rotate with a corrupted fresh share throws and leaves the state byte-identical", async () => {
-    const { rotate, ROTATE_TEST_HOOK } = await import("./cross-backup.js");
+    const { rotate } = await import("./cross-backup.js");
+    const { splitPassphrase } = await import("./shamir.js");
     const { createHash } = await import("crypto");
     const dir = mkdtempSync(join(tmpdir(), "exuvia-rot-rt-"));
     await init("nyx", ["tyto", "kiro"], "RoundTrip!", "key", dir);
@@ -503,24 +504,51 @@ describe("cross-backup — rotate round-trip (Tyto 12 Oct)", () => {
       createHash("sha256").update(readFileSync(file)).digest("hex");
     const before = sha();
     let landed = false;
-    ROTATE_TEST_HOOK.afterSplit = (shares) => {
-      shares[1][4] ^= 0xff;
+    const brokenSplit: typeof splitPassphrase = async (...args) => {
+      const r = await splitPassphrase(...args);
+      r.shares[1][4] ^= 0xff;
       landed = true;
+      return r;
     };
-    try {
-      await assert.rejects(
-        () => rotate("RoundTrip!", "key", dir),
-        /do not reconstruct/,
-      );
-    } finally {
-      ROTATE_TEST_HOOK.afterSplit = undefined;
-    }
-    assert.ok(landed, "the hook must have corrupted a share");
+    await assert.rejects(
+      () => rotate("RoundTrip!", "key", dir, { split: brokenSplit }),
+      /do not reconstruct/,
+    );
+    assert.ok(landed, "the split wrapper must have corrupted a share");
     assert.equal(sha(), before, "state file must be unchanged");
-    // and without the hook the same rotate goes through
+    // and without the fault the same rotate goes through
     const ok = await rotate("RoundTrip!", "key", dir);
     assert.equal(ok.newVersion, 2);
     assert.notEqual(sha(), before);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("rotate with a share encrypted under the wrong key throws and leaves the state byte-identical", async () => {
+    const { rotate, encryptShare } = await import("./cross-backup.js");
+    const { createHash } = await import("crypto");
+    const dir = mkdtempSync(join(tmpdir(), "exuvia-rot-enc-"));
+    await init("nyx", ["tyto", "kiro"], "RoundTrip!", "key", dir);
+    const file = join(dir, ".exuvia-cross-backup.json");
+    const sha = () =>
+      createHash("sha256").update(readFileSync(file)).digest("hex");
+    const before = sha();
+    let calls = 0;
+    let landed = false;
+    // Encrypts the second share (first partner) under a different key once.
+    const brokenEncrypt: typeof encryptShare = (hex, pp) => {
+      calls += 1;
+      if (calls === 2) {
+        landed = true;
+        return encryptShare(hex, pp + "-wrong");
+      }
+      return encryptShare(hex, pp);
+    };
+    await assert.rejects(
+      () => rotate("RoundTrip!", "key", dir, { encrypt: brokenEncrypt }),
+      /cannot be decrypted/,
+    );
+    assert.ok(landed, "the encrypt wrapper must have used the wrong key");
+    assert.equal(sha(), before, "state file must be unchanged");
     rmSync(dir, { recursive: true, force: true });
   });
 });
