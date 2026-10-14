@@ -29,7 +29,13 @@ import {
   hexToShare,
   formatSharesForDistribution,
 } from "./shamir.js";
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
+import {
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  mkdirSync,
+  statSync,
+} from "fs";
 import {
   ping as dmsPing,
   status as dmsStatus,
@@ -89,7 +95,7 @@ Usage:
     (--local-passphrase <lpp> still works, but only the file variant proves the passphrase is kept)
     Initialize cross-backup: split passphrase into Shamir shares.
 
-  exuvia cross-backup receive --from <id> --share <hex> --hash <sha256> --local-passphrase-file <file>   (or --local-passphrase <lpp>)
+  exuvia cross-backup receive --from <id> --share-file <file|-> --hash <sha256> --local-passphrase-file <file>   (or --share <hex> / --local-passphrase <lpp>; "-" = stdin; delete share files afterwards: shred -u)
     Receive and store a partner's share.
 
   exuvia cross-backup status --local-passphrase-file <file>   (or --local-passphrase <lpp>)
@@ -848,17 +854,32 @@ async function crossBackupInitCmd(args: string[]): Promise<void> {
   log(`   Each partner needs: share hex + hash for verification.`);
 }
 
+/** At most one secret may come from stdin, or the second reads EOF (Tyto, review #20). */
+function assertSingleStdin(args: string[]): void {
+  const n = args.filter(
+    (a, i) => a === "-" && args[i - 1]?.endsWith("-file"),
+  ).length;
+  if (n > 1) {
+    console.error('❌ only one secret can come from stdin ("-")');
+    process.exit(1);
+  }
+}
+
 async function crossBackupReceiveCmd(args: string[]): Promise<void> {
+  assertSingleStdin(args);
   const fromId = getArg(args, "--from");
-  const shareHex = getArg(args, "--share");
   const expectedHash = getArg(args, "--hash");
   const arweaveTxId = getArg(args, "--arweave-tx");
   const stateDir = getArg(args, "--state-dir") || ".";
 
-  if (!fromId || !shareHex || !expectedHash) {
-    console.error("❌ --from, --share and --hash required");
+  if (!fromId || !expectedHash) {
+    console.error("❌ --from, --share-file (or --share) and --hash required");
     process.exit(1);
   }
+  // --share <hex> puts the share in argv (/proc/<pid>/cmdline, ps). Prefer
+  // --share-file, same rule as the passphrase: exit before any write if the
+  // file is missing or empty.
+  const shareHex = resolveSecretArg(args, "--share-file", "--share", "Share");
   // Same rule as status: prefer --local-passphrase-file, exit before any
   // write if it is missing or empty.
   const localPassphrase = resolveLocalPassphrase(args);
@@ -884,33 +905,69 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
 }
 
 /**
- * Resolve the local passphrase for commands that only READ it.
- * Prefers --local-passphrase-file (keeps the secret out of argv / `ps`, and
- * a later, separate process reading the stored file is the second reader
- * Kiro asked for). Falls back to --local-passphrase. Exits on missing/empty.
+ * Read a secret from `fileFlag` (preferred) or `inlineFlag`.
+ * - `fileFlag -` reads stdin, so `pass show … | exuvia … --share-file -` never
+ *   puts the secret on disk (Tyto, review #19).
+ * - Both flags at once → exit 1 instead of silently preferring one.
+ * - A file readable by group/others gets a warning, like ssh does for keys.
+ * - Missing or empty → exit 1 before anything is written.
  */
-function resolveLocalPassphrase(args: string[]): string {
-  const file = getArg(args, "--local-passphrase-file");
+function resolveSecretArg(
+  args: string[],
+  fileFlag: string,
+  inlineFlag: string,
+  what: string,
+): string {
+  const file = getArg(args, fileFlag);
+  const inline = getArg(args, inlineFlag);
+  if (file && inline) {
+    console.error(`❌ ${fileFlag} and ${inlineFlag} both given — use one`);
+    process.exit(1);
+  }
   if (file) {
-    if (!existsSync(file)) {
-      console.error(`❌ Local passphrase file not found: ${file}`);
-      process.exit(1);
+    let v: string;
+    if (file === "-") {
+      v = readFileSync(0, "utf8").trim();
+    } else {
+      if (!existsSync(file)) {
+        console.error(`❌ ${what} file not found: ${file}`);
+        process.exit(1);
+      }
+      if ((statSync(file).mode & 0o077) !== 0) {
+        console.error(
+          `⚠️  ${what} file ${file} is readable by group/others (chmod 600, and delete it afterwards: shred -u)`,
+        );
+      }
+      v = readFileSync(file, "utf8").trim();
     }
-    const v = readFileSync(file, "utf8").trim();
     if (!v) {
-      console.error(`❌ Local passphrase file is empty: ${file}`);
+      console.error(
+        file === "-"
+          ? `❌ ${what} from stdin is empty`
+          : `❌ ${what} file is empty: ${file}`,
+      );
       process.exit(1);
     }
     return v;
   }
-  const v = getArg(args, "--local-passphrase");
-  if (!v) {
-    console.error(
-      "❌ --local-passphrase-file (preferred) or --local-passphrase required",
-    );
+  if (!inline) {
+    console.error(`❌ ${fileFlag} (preferred) or ${inlineFlag} required`);
     process.exit(1);
   }
-  return v;
+  return inline;
+}
+
+/**
+ * Local passphrase for commands that only READ it: --local-passphrase-file
+ * (keeps it out of argv / `ps`; Kiro's "second reader") or --local-passphrase.
+ */
+function resolveLocalPassphrase(args: string[]): string {
+  return resolveSecretArg(
+    args,
+    "--local-passphrase-file",
+    "--local-passphrase",
+    "Local passphrase",
+  );
 }
 
 async function crossBackupStatusCmd(args: string[]): Promise<void> {

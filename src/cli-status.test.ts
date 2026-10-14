@@ -4,7 +4,16 @@
  */
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "fs";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  statSync,
+  chmodSync,
+  readdirSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
@@ -212,13 +221,14 @@ describe("cli — cross-backup status --local-passphrase-file", () => {
   });
 });
 
-function runReceive(args: string[]) {
+function runReceive(args: string[], input?: string) {
   const r = spawnSync(
     process.execPath,
     [CLI, "cross-backup", "receive", ...args],
     {
       encoding: "utf8",
       timeout: 20000,
+      input,
     },
   );
   return { code: r.status, out: `${r.stdout}${r.stderr}` };
@@ -319,6 +329,164 @@ describe("cli — cross-backup receive --local-passphrase-file", () => {
     assert.equal(s.code, 2, s.out);
     assert.match(s.out, /nothing received yet from: kiro/);
     assert.match(s.out, /All stored shares: ✅/);
+  });
+});
+
+describe("cross-backup receive --share-file", () => {
+  let dir: string;
+  const hex = "tyto-share-for-nyx";
+  const statePath = () => join(dir, ".exuvia-cross-backup.json");
+  const base = () => [
+    "--from",
+    "tyto",
+    "--hash",
+    hashShare(hex),
+    "--local-passphrase-file",
+    join(dir, "lpp"),
+    "--state-dir",
+    dir,
+  ];
+
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-cli-sharefile-"));
+    await init("nyx", ["tyto", "kiro"], "pass", "cli-key", dir);
+    writeFileSync(join(dir, "lpp"), "cli-key\n", { mode: 0o600 });
+    writeFileSync(join(dir, "share-ok"), hex + "\n", { mode: 0o600 });
+    writeFileSync(join(dir, "share-empty"), " \n", { mode: 0o600 });
+  });
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  for (const [name, file, msg] of [
+    ["missing", "nope", /Share file not found/],
+    ["empty", "share-empty", /Share file is empty/],
+  ] as const) {
+    it(`${name} share file -> exit 1, nothing written`, () => {
+      const before = readFileSync(statePath(), "utf8");
+      const r = runReceive([...base(), "--share-file", join(dir, file)]);
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, msg);
+      assert.equal(
+        readFileSync(statePath(), "utf8"),
+        before,
+        "state changed on abort",
+      );
+      assert.ok(
+        !existsSync(join(dir, ".exuvia-received-shares.json")),
+        "received file written on abort",
+      );
+    });
+  }
+
+  it("share from file -> stored, decrypts to the file content, share not in argv", () => {
+    const args = [...base(), "--share-file", join(dir, "share-ok")];
+    assert.ok(!args.includes(hex), "test passes the share in argv");
+    const r = runReceive(args);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /verified and stored/);
+    const rec = JSON.parse(
+      readFileSync(join(dir, ".exuvia-received-shares.json"), "utf8"),
+    );
+    assert.equal(decryptShare(rec.tyto.shareHex, "cli-key"), hex);
+    assert.equal(
+      statSync(join(dir, ".exuvia-received-shares.json")).mode & 0o777,
+      0o600,
+      "received-shares file must be 0600",
+    );
+  });
+});
+
+describe("cross-backup receive --share-file - (stdin) and guards (Tyto, review #19)", () => {
+  let dir: string;
+  const hex = "kiro-share-for-nyx";
+  const base = () => [
+    "--from",
+    "kiro",
+    "--hash",
+    hashShare(hex),
+    "--local-passphrase-file",
+    join(dir, "lpp"),
+    "--state-dir",
+    dir,
+  ];
+  const received = () => join(dir, ".exuvia-received-shares.json");
+
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-cli-stdin-"));
+    await init("nyx", ["tyto", "kiro"], "pass", "cli-key", dir);
+    writeFileSync(join(dir, "lpp"), "cli-key\n", { mode: 0o600 });
+    writeFileSync(join(dir, "share-open"), hex + "\n", { mode: 0o644 });
+  });
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("--share-file - reads stdin: stored, decrypts, nothing in argv", () => {
+    const args = [...base(), "--share-file", "-"];
+    assert.ok(!args.includes(hex), "test passes the share in argv");
+    const r = runReceive(args, hex + "\n");
+    assert.equal(r.code, 0, r.out);
+    const rec = JSON.parse(readFileSync(received(), "utf8"));
+    assert.equal(decryptShare(rec.kiro.shareHex, "cli-key"), hex);
+    rmSync(received());
+  });
+
+  it("empty stdin -> exit 1, nothing written", () => {
+    const r = runReceive([...base(), "--share-file", "-"], "  \n");
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /from stdin is empty/);
+    assert.ok(!existsSync(received()), "received file written on abort");
+  });
+
+  it("--share-file and --share together -> exit 1, nothing written", () => {
+    const r = runReceive([
+      ...base(),
+      "--share-file",
+      join(dir, "share-open"),
+      "--share",
+      hex,
+    ]);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /both given/);
+    assert.ok(!existsSync(received()), "received file written on abort");
+  });
+
+  it("two secrets from stdin -> exit 1 with a clear message, nothing written", () => {
+    const args = [
+      "--from",
+      "kiro",
+      "--hash",
+      hashShare(hex),
+      "--local-passphrase-file",
+      "-",
+      "--state-dir",
+      dir,
+      "--share-file",
+      "-",
+    ];
+    const r = runReceive(args, hex + "\n");
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /only one secret can come from stdin/);
+    assert.ok(!existsSync(received()), "received file written on abort");
+  });
+
+  it("received-shares stays 0600 when it already existed as 0644, no temp file left", () => {
+    writeFileSync(received(), "{}", { mode: 0o644 });
+    chmodSync(received(), 0o644);
+    const r = runReceive([...base(), "--share-file", "-"], hex + "\n");
+    assert.equal(r.code, 0, r.out);
+    assert.equal(statSync(received()).mode & 0o777, 0o600);
+    assert.deepEqual(
+      readdirSync(dir).filter((f) => f.includes(".tmp-")),
+      [],
+      "temp file left behind",
+    );
+    rmSync(received());
+  });
+
+  it("group/world-readable share file -> warning, still works", () => {
+    const r = runReceive([...base(), "--share-file", join(dir, "share-open")]);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /readable by group\/others/);
   });
 });
 
