@@ -89,7 +89,7 @@ Usage:
     (--local-passphrase <lpp> still works, but only the file variant proves the passphrase is kept)
     Initialize cross-backup: split passphrase into Shamir shares.
 
-  exuvia cross-backup receive --from <id> --share <hex> --hash <sha256> --local-passphrase-file <file>   (or --local-passphrase <lpp>)
+  exuvia cross-backup receive --from <id> --share-file <file> --hash <sha256> --local-passphrase-file <file>   (or --share <hex> / --local-passphrase <lpp>)
     Receive and store a partner's share.
 
   exuvia cross-backup status --local-passphrase-file <file>   (or --local-passphrase <lpp>)
@@ -850,15 +850,18 @@ async function crossBackupInitCmd(args: string[]): Promise<void> {
 
 async function crossBackupReceiveCmd(args: string[]): Promise<void> {
   const fromId = getArg(args, "--from");
-  const shareHex = getArg(args, "--share");
   const expectedHash = getArg(args, "--hash");
   const arweaveTxId = getArg(args, "--arweave-tx");
   const stateDir = getArg(args, "--state-dir") || ".";
 
-  if (!fromId || !shareHex || !expectedHash) {
-    console.error("❌ --from, --share and --hash required");
+  if (!fromId || !expectedHash) {
+    console.error("❌ --from, --share-file (or --share) and --hash required");
     process.exit(1);
   }
+  // --share <hex> puts the share in argv (/proc/<pid>/cmdline, ps). Prefer
+  // --share-file, same rule as the passphrase: exit before any write if the
+  // file is missing or empty.
+  const shareHex = resolveSecretArg(args, "--share-file", "--share", "Share");
   // Same rule as status: prefer --local-passphrase-file, exit before any
   // write if it is missing or empty.
   const localPassphrase = resolveLocalPassphrase(args);
@@ -889,6 +892,33 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
  * a later, separate process reading the stored file is the second reader
  * Kiro asked for). Falls back to --local-passphrase. Exits on missing/empty.
  */
+function resolveSecretArg(
+  args: string[],
+  fileFlag: string,
+  inlineFlag: string,
+  what: string,
+): string {
+  const file = getArg(args, fileFlag);
+  if (file) {
+    if (!existsSync(file)) {
+      console.error(`❌ ${what} file not found: ${file}`);
+      process.exit(1);
+    }
+    const v = readFileSync(file, "utf8").trim();
+    if (!v) {
+      console.error(`❌ ${what} file is empty: ${file}`);
+      process.exit(1);
+    }
+    return v;
+  }
+  const v = getArg(args, inlineFlag);
+  if (!v) {
+    console.error(`❌ ${fileFlag} (preferred) or ${inlineFlag} required`);
+    process.exit(1);
+  }
+  return v;
+}
+
 function resolveLocalPassphrase(args: string[]): string {
   const file = getArg(args, "--local-passphrase-file");
   if (file) {

@@ -4,7 +4,13 @@
  */
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "fs";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
@@ -319,6 +325,65 @@ describe("cli — cross-backup receive --local-passphrase-file", () => {
     assert.equal(s.code, 2, s.out);
     assert.match(s.out, /nothing received yet from: kiro/);
     assert.match(s.out, /All stored shares: ✅/);
+  });
+});
+
+describe("cross-backup receive --share-file", () => {
+  let dir: string;
+  const hex = "tyto-share-for-nyx";
+  const statePath = () => join(dir, ".exuvia-cross-backup.json");
+  const base = () => [
+    "--from",
+    "tyto",
+    "--hash",
+    hashShare(hex),
+    "--local-passphrase-file",
+    join(dir, "lpp"),
+    "--state-dir",
+    dir,
+  ];
+
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-cli-sharefile-"));
+    await init("nyx", ["tyto", "kiro"], "pass", "cli-key", dir);
+    writeFileSync(join(dir, "lpp"), "cli-key\n", { mode: 0o600 });
+    writeFileSync(join(dir, "share-ok"), hex + "\n", { mode: 0o600 });
+    writeFileSync(join(dir, "share-empty"), " \n", { mode: 0o600 });
+  });
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  for (const [name, file, msg] of [
+    ["missing", "nope", /Share file not found/],
+    ["empty", "share-empty", /Share file is empty/],
+  ] as const) {
+    it(`${name} share file -> exit 1, nothing written`, () => {
+      const before = readFileSync(statePath(), "utf8");
+      const r = runReceive([...base(), "--share-file", join(dir, file)]);
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, msg);
+      assert.equal(
+        readFileSync(statePath(), "utf8"),
+        before,
+        "state changed on abort",
+      );
+      assert.ok(
+        !existsSync(join(dir, ".exuvia-received-shares.json")),
+        "received file written on abort",
+      );
+    });
+  }
+
+  it("share from file -> stored, decrypts to the file content, share not in argv", () => {
+    const args = [...base(), "--share-file", join(dir, "share-ok")];
+    assert.ok(!args.includes(hex), "test passes the share in argv");
+    const r = runReceive(args);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /verified and stored/);
+    const rec = JSON.parse(
+      readFileSync(join(dir, ".exuvia-received-shares.json"), "utf8"),
+    );
+    assert.equal(decryptShare(rec.tyto.shareHex, "cli-key"), hex);
   });
 });
 
