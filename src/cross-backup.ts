@@ -12,7 +12,7 @@
  * @since v0.3.0
  */
 
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, chmodSync } from "fs";
 import {
   createHash,
   createCipheriv,
@@ -427,7 +427,10 @@ export function receiveShare(
     arweaveTxId,
   };
 
-  writeFileSync(receivedPath, JSON.stringify(received, null, 2));
+  writeFileSync(receivedPath, JSON.stringify(received, null, 2), {
+    mode: 0o600,
+  });
+  chmodSync(receivedPath, 0o600); // mode only applies on create (Tyto, review #19)
   return { verified: true, stored: true };
 }
 
