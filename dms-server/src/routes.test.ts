@@ -7,6 +7,8 @@
 
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import app from "./routes.js";
 import { getDb, closeDb } from "./db.js";
 import { registerAgent, hashSecret } from "./auth.js";
@@ -51,6 +53,13 @@ describe("DMS Server Routes", () => {
 
   after(() => {
     closeDb();
+    // The tests must never write a real database next to the code: a stray
+    // dms.db leaked snoozes into the next run (Tyto, review #23). CI runs
+    // from dms-server/, so cwd is the folder to check.
+    assert.ok(
+      !existsSync(join(process.cwd(), "dms.db")),
+      "tests wrote a real dms.db",
+    );
   });
 
   // ── Health Check ───────────────────────────────────────────────
@@ -145,6 +154,21 @@ describe("DMS Server Routes", () => {
       getDb()
         .prepare("UPDATE agents SET last_ping = ? WHERE id = ?")
         .run(new Date(t).toISOString(), TEST_AGENT_ID);
+      const realNow = Date.now;
+      Date.now = () => t;
+      try {
+        const { json } = await request("GET", `/status/${TEST_AGENT_ID}`);
+        assert.strictEqual(json.hoursSinceLastPing, 0);
+      } finally {
+        Date.now = realNow;
+      }
+    });
+
+    it("a ping time in the future (clock skew) reports 0, not negative", async () => {
+      const t = Date.parse("2026-10-14T02:00:00.000Z");
+      getDb()
+        .prepare("UPDATE agents SET last_ping = ? WHERE id = ?")
+        .run(new Date(t + 60_000).toISOString(), TEST_AGENT_ID);
       const realNow = Date.now;
       Date.now = () => t;
       try {
@@ -301,5 +325,17 @@ describe("Auth Module", () => {
     const h = hashSecret("test");
     assert.equal(h.length, 64);
     assert.match(h, /^[0-9a-f]{64}$/);
+  });
+});
+
+describe("db handle", () => {
+  it("getDb() after closeDb() opens a fresh connection", () => {
+    process.env.DMS_DB_PATH = ":memory:";
+    getDb();
+    closeDb();
+    const d = getDb();
+    assert.equal(d.open, true);
+    assert.deepEqual(d.prepare("SELECT 1 AS x").get(), { x: 1 });
+    closeDb();
   });
 });

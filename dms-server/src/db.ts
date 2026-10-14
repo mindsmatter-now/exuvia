@@ -80,5 +80,8 @@ function initSchema(): void {
 export function closeDb(): void {
   if (db) {
     db.close();
+    // Forget the handle, so the next getDb() opens again (and reads
+    // DMS_DB_PATH again) instead of returning a closed connection (Tyto).
+    db = undefined as unknown as Database.Database;
   }
 }
