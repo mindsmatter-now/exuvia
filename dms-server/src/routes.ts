@@ -102,9 +102,12 @@ app.get("/status/:agentId", (c) => {
     lastPing: agent.last_ping,
     pingCount: agent.ping_count,
     thresholdHours: agent.threshold_hours,
-    hoursSinceLastPing: hoursSinceLastPing
-      ? Math.round(hoursSinceLastPing * 100) / 100
-      : null,
+    // !== null, not truthiness: a ping in the same millisecond is 0 hours,
+    // and 0 must not turn into null (flaky CI on PR #21, 14 Oct).
+    hoursSinceLastPing:
+      hoursSinceLastPing !== null
+        ? Math.round(hoursSinceLastPing * 100) / 100
+        : null,
     createdAt: agent.created_at,
   });
 });

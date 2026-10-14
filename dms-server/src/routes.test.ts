@@ -139,6 +139,22 @@ describe("DMS Server Routes", () => {
       assert.ok(json.hoursSinceLastPing < 1); // just pinged
     });
 
+    it("a ping 0 ms ago reports 0 hours, not null", async () => {
+      // Freeze the clock at the stored ping time: exactly 0 hours since.
+      const t = Date.parse("2026-10-14T02:00:00.000Z");
+      getDb()
+        .prepare("UPDATE agents SET last_ping = ? WHERE id = ?")
+        .run(new Date(t).toISOString(), TEST_AGENT_ID);
+      const realNow = Date.now;
+      Date.now = () => t;
+      try {
+        const { json } = await request("GET", `/status/${TEST_AGENT_ID}`);
+        assert.strictEqual(json.hoursSinceLastPing, 0);
+      } finally {
+        Date.now = realNow;
+      }
+    });
+
     it("should return 404 for unknown agent", async () => {
       const { status, json } = await request("GET", "/status/unknown-agent");
       assert.equal(status, 404);
