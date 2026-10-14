@@ -45,7 +45,14 @@ async function request(
 process.env.DMS_DB_PATH = ":memory:";
 
 describe("DMS Server Routes", () => {
+  // A dms.db a developer keeps here on purpose (e.g. `node dist/index.js`
+  // without DMS_DB_PATH) is not the tests' fault: only a file that APPEARS
+  // during the run fails the guard below (Tyto, review #23).
+  const strayDb = join(process.cwd(), "dms.db");
+  let hadDbBefore = false;
+
   before(() => {
+    hadDbBefore = existsSync(strayDb);
     // Initialize DB + register test agent
     getDb();
     registerAgent(TEST_AGENT_ID, TEST_AGENT_NAME, TEST_SECRET, 72);
@@ -56,10 +63,7 @@ describe("DMS Server Routes", () => {
     // The tests must never write a real database next to the code: a stray
     // dms.db leaked snoozes into the next run (Tyto, review #23). CI runs
     // from dms-server/, so cwd is the folder to check.
-    assert.ok(
-      !existsSync(join(process.cwd(), "dms.db")),
-      "tests wrote a real dms.db",
-    );
+    assert.ok(hadDbBefore || !existsSync(strayDb), "tests wrote a real dms.db");
   });
 
   // ── Health Check ───────────────────────────────────────────────
