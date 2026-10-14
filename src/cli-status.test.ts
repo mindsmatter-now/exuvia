@@ -577,3 +577,77 @@ describe("cli — cross-backup rotate --local-passphrase-file", () => {
     assert.ok(!r.out.includes("cli-key"), "local passphrase leaked to output");
   });
 });
+
+function runInit(args: string[]) {
+  const r = spawnSync(
+    process.execPath,
+    [CLI, "cross-backup", "init", ...args],
+    {
+      encoding: "utf8",
+      timeout: 60000,
+    },
+  );
+  return { code: r.status, out: `${r.stdout}${r.stderr}` };
+}
+
+describe("cross-backup init: same local-passphrase guards as receive (Kiro, review #20)", () => {
+  let dir: string;
+  const state = () => join(dir, ".exuvia-cross-backup.json");
+  const base = () => [
+    "--agent",
+    "nyx",
+    "--partners",
+    "tyto,kiro",
+    "--passphrase",
+    "init-pass",
+    "--state-dir",
+    dir,
+  ];
+
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-cli-init-"));
+    writeFileSync(join(dir, "lpp"), "init-key\n", { mode: 0o600 });
+    writeFileSync(join(dir, "lpp-empty"), " \n", { mode: 0o600 });
+    writeFileSync(join(dir, "lpp-open"), "init-key\n", { mode: 0o644 });
+    chmodSync(join(dir, "lpp-open"), 0o644);
+  });
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  for (const [name, extra, msg] of [
+    [
+      "both flags",
+      () => [
+        "--local-passphrase-file",
+        join(dir, "lpp"),
+        "--local-passphrase",
+        "x",
+      ],
+      /both given/,
+    ],
+    [
+      "empty file",
+      () => ["--local-passphrase-file", join(dir, "lpp-empty")],
+      /file is empty/,
+    ],
+    ["stdin", () => ["--local-passphrase-file", "-"], /not stdin/],
+  ] as const) {
+    it(`${name} -> exit 1, no state written`, () => {
+      const r = runInit([...base(), ...extra()]);
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, msg);
+      assert.ok(!existsSync(state()), "state written on abort");
+    });
+  }
+
+  it("group/world-readable lpp file -> warning, init still works", () => {
+    const r = runInit([
+      ...base(),
+      "--local-passphrase-file",
+      join(dir, "lpp-open"),
+    ]);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /readable by group\/others/);
+    assert.ok(existsSync(state()));
+  });
+});

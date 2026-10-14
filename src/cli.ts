@@ -95,13 +95,13 @@ Usage:
     (--local-passphrase <lpp> still works, but only the file variant proves the passphrase is kept)
     Initialize cross-backup: split passphrase into Shamir shares.
 
-  exuvia cross-backup receive --from <id> --share-file <file|-> --hash <sha256> --local-passphrase-file <file>   (or --share <hex> / --local-passphrase <lpp>; "-" = stdin; delete share files afterwards: shred -u)
+  exuvia cross-backup receive --from <id> --share-file <file|-> --hash <sha256> --local-passphrase-file <file|->   (or --share <hex> / --local-passphrase <lpp>; "-" = stdin, at most one per call; delete share files afterwards: shred -u)
     Receive and store a partner's share.
 
-  exuvia cross-backup status --local-passphrase-file <file>   (or --local-passphrase <lpp>)
+  exuvia cross-backup status --local-passphrase-file <file|->   (or --local-passphrase <lpp>; "-" = stdin)
     Show cross-backup triangle status.
 
-  exuvia cross-backup rotate --passphrase <pp> --local-passphrase-file <file>   (or --local-passphrase <lpp>)
+  exuvia cross-backup rotate --passphrase <pp> --local-passphrase-file <file|->   (or --local-passphrase <lpp>; "-" = stdin)
     Rotate shares (re-split with new Shamir).
 
   exuvia cross-backup recover --agent <id> --local-passphrase <lpp> --shares <hex1,hex2>
@@ -805,25 +805,31 @@ async function crossBackupInitCmd(args: string[]): Promise<void> {
   const passphrase = getPassphrase(args);
   // Prefer --local-passphrase-file: init then re-reads the FILE after writing the
   // state and verifies with what is actually stored (not with what we typed).
+  // Same guards as receive/status/rotate via resolveSecretArg (Kiro, review
+  // #20): both flags → exit 1, open file → warning, empty file → "is empty".
+  // stdin ("-") is refused here: the read-back needs a file to read again.
   const lppFile = getArg(args, "--local-passphrase-file");
-  let localPassphrase = getArg(args, "--local-passphrase");
-  let loadKept: (() => string) | undefined;
-  if (lppFile) {
-    if (!existsSync(lppFile)) {
-      console.error(
-        `❌ Local passphrase file not found: ${lppFile} (store it first)`,
-      );
-      process.exit(1);
-    }
-    localPassphrase = readFileSync(lppFile, "utf8").trim();
-    loadKept = () => readFileSync(lppFile, "utf8");
-  }
-  if (!localPassphrase) {
+  if (lppFile === "-") {
     console.error(
-      "❌ --local-passphrase-file (preferred) or --local-passphrase required (for encrypting shares at rest)",
+      "❌ init needs --local-passphrase-file <file>, not stdin: it re-reads the stored file to verify it",
     );
     process.exit(1);
   }
+  if (lppFile && !existsSync(lppFile)) {
+    console.error(
+      `❌ Local passphrase file not found: ${lppFile} (store it first)`,
+    );
+    process.exit(1);
+  }
+  const localPassphrase = resolveSecretArg(
+    args,
+    "--local-passphrase-file",
+    "--local-passphrase",
+    "Local passphrase",
+  );
+  const loadKept: (() => string) | undefined = lppFile
+    ? () => readFileSync(lppFile, "utf8")
+    : undefined;
 
   log(`🔺 Cross-Backup Init — ${agentId}`);
   log(`   Partners: ${partnerIds.join(", ")}`);
