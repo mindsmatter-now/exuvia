@@ -150,7 +150,7 @@ describe("DMS Server Routes", () => {
 
     it("a ping 0 ms ago reports 0 hours, not null", async () => {
       // Freeze the clock at the stored ping time: exactly 0 hours since.
-      const t = Date.parse("2026-10-14T02:00:00.000Z");
+      const t = Date.now(); // real "now", so a later real-clock test never sees a 72 h old ping (Kiro)
       getDb()
         .prepare("UPDATE agents SET last_ping = ? WHERE id = ?")
         .run(new Date(t).toISOString(), TEST_AGENT_ID);
@@ -165,7 +165,7 @@ describe("DMS Server Routes", () => {
     });
 
     it("a ping time in the future (clock skew) reports 0, not negative", async () => {
-      const t = Date.parse("2026-10-14T02:00:00.000Z");
+      const t = Date.now(); // real "now", so a later real-clock test never sees a 72 h old ping (Kiro)
       getDb()
         .prepare("UPDATE agents SET last_ping = ? WHERE id = ?")
         .run(new Date(t + 60_000).toISOString(), TEST_AGENT_ID);
