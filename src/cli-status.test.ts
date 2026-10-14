@@ -469,11 +469,20 @@ describe("cross-backup receive --share-file - (stdin) and guards (Tyto, review #
     assert.ok(!existsSync(received()), "received file written on abort");
   });
 
-  it("received-shares stays 0600 when it already existed as 0644, no temp file left", () => {
+  it("existing 0644 received-shares is REPLACED (new inode), ends 0600, no temp left", () => {
+    // Inode check (Tyto, review eb471ee): an in-place overwrite keeps the inode
+    // and is what opens the 0644 window and the crash risk. A replaced file
+    // proves the temp+rename mechanism is actually used.
     writeFileSync(received(), "{}", { mode: 0o644 });
     chmodSync(received(), 0o644);
+    const ino = statSync(received()).ino;
     const r = runReceive([...base(), "--share-file", "-"], hex + "\n");
     assert.equal(r.code, 0, r.out);
+    assert.notEqual(
+      statSync(received()).ino,
+      ino,
+      "file was overwritten in place",
+    );
     assert.equal(statSync(received()).mode & 0o777, 0o600);
     assert.deepEqual(
       readdirSync(dir).filter((f) => f.includes(".tmp-")),

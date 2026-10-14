@@ -22,7 +22,9 @@ import {
   fsyncSync,
   closeSync,
   renameSync,
+  unlinkSync,
 } from "fs";
+import { dirname } from "path";
 import {
   createHash,
   createCipheriv,
@@ -451,13 +453,34 @@ function writePrivateAtomic(path: string, content: string): void {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
   const fd = openSync(tmp, "wx", 0o600);
   try {
-    writeSync(fd, content);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
+    try {
+      writeSync(fd, content);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    chmodSync(tmp, 0o600); // umask cannot widen it, but be explicit
+    renameSync(tmp, path);
+  } catch (e) {
+    // disk full etc.: never leave a temp copy of all received shares behind (Tyto)
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* already gone */
+    }
+    throw e;
   }
-  chmodSync(tmp, 0o600); // umask cannot widen it, but be explicit
-  renameSync(tmp, path);
+  // make the rename itself durable (Tyto; mostly a no-op on ext4)
+  try {
+    const dfd = openSync(dirname(path), "r");
+    try {
+      fsyncSync(dfd);
+    } finally {
+      closeSync(dfd);
+    }
+  } catch {
+    /* some platforms cannot fsync a directory */
+  }
 }
 
 // ── Verify Share ───────────────────────────────────────────────────
