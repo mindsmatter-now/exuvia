@@ -12,7 +12,17 @@
  * @since v0.3.0
  */
 
-import { readFileSync, writeFileSync, existsSync, chmodSync } from "fs";
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  chmodSync,
+  openSync,
+  writeSync,
+  fsyncSync,
+  closeSync,
+  renameSync,
+} from "fs";
 import {
   createHash,
   createCipheriv,
@@ -427,11 +437,27 @@ export function receiveShare(
     arweaveTxId,
   };
 
-  writeFileSync(receivedPath, JSON.stringify(received, null, 2), {
-    mode: 0o600,
-  });
-  chmodSync(receivedPath, 0o600); // mode only applies on create (Tyto, review #19)
+  writePrivateAtomic(receivedPath, JSON.stringify(received, null, 2));
   return { verified: true, stored: true };
+}
+
+/**
+ * Write `content` to `path` as 0600, atomically (Tyto, review #20): a fresh
+ * temp file is created 0600, fsynced, then renamed over the target. The new
+ * content is never in a 0644 file, and a crash mid-write leaves the old file
+ * intact instead of truncating every received share.
+ */
+function writePrivateAtomic(path: string, content: string): void {
+  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+  const fd = openSync(tmp, "wx", 0o600);
+  try {
+    writeSync(fd, content);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  chmodSync(tmp, 0o600); // umask cannot widen it, but be explicit
+  renameSync(tmp, path);
 }
 
 // ── Verify Share ───────────────────────────────────────────────────

@@ -11,6 +11,8 @@ import {
   readFileSync,
   existsSync,
   statSync,
+  chmodSync,
+  readdirSync,
 } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -446,6 +448,39 @@ describe("cross-backup receive --share-file - (stdin) and guards (Tyto, review #
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /both given/);
     assert.ok(!existsSync(received()), "received file written on abort");
+  });
+
+  it("two secrets from stdin -> exit 1 with a clear message, nothing written", () => {
+    const args = [
+      "--from",
+      "kiro",
+      "--hash",
+      hashShare(hex),
+      "--local-passphrase-file",
+      "-",
+      "--state-dir",
+      dir,
+      "--share-file",
+      "-",
+    ];
+    const r = runReceive(args, hex + "\n");
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /only one secret can come from stdin/);
+    assert.ok(!existsSync(received()), "received file written on abort");
+  });
+
+  it("received-shares stays 0600 when it already existed as 0644, no temp file left", () => {
+    writeFileSync(received(), "{}", { mode: 0o644 });
+    chmodSync(received(), 0o644);
+    const r = runReceive([...base(), "--share-file", "-"], hex + "\n");
+    assert.equal(r.code, 0, r.out);
+    assert.equal(statSync(received()).mode & 0o777, 0o600);
+    assert.deepEqual(
+      readdirSync(dir).filter((f) => f.includes(".tmp-")),
+      [],
+      "temp file left behind",
+    );
+    rmSync(received());
   });
 
   it("group/world-readable share file -> warning, still works", () => {

@@ -854,7 +854,19 @@ async function crossBackupInitCmd(args: string[]): Promise<void> {
   log(`   Each partner needs: share hex + hash for verification.`);
 }
 
+/** At most one secret may come from stdin, or the second reads EOF (Tyto, review #20). */
+function assertSingleStdin(args: string[]): void {
+  const n = args.filter(
+    (a, i) => a === "-" && args[i - 1]?.endsWith("-file"),
+  ).length;
+  if (n > 1) {
+    console.error('❌ only one secret can come from stdin ("-")');
+    process.exit(1);
+  }
+}
+
 async function crossBackupReceiveCmd(args: string[]): Promise<void> {
+  assertSingleStdin(args);
   const fromId = getArg(args, "--from");
   const expectedHash = getArg(args, "--hash");
   const arweaveTxId = getArg(args, "--arweave-tx");
