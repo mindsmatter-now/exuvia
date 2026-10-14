@@ -5,7 +5,12 @@
  * Hono + SQLite. Portable. Self-contained.
  *
  * Usage:
- *   DMS_PORT=3870 DMS_DB_PATH=./dms.db node dist/index.js
+ *   DMS_PORT=3870 DMS_DB_PATH=/var/lib/exuvia-dms/dms.db node dist/index.js
+ *
+ * Keep a local database OUTSIDE dms-server/ (set DMS_DB_PATH). Without it the
+ * file lands in the working directory. It is gitignored, and a file that
+ * already exists does not fail the tests' "no stray dms.db" guard, but a
+ * separate path keeps test runs and real data apart.
  */
 
 import { serve } from "@hono/node-server";

@@ -7,7 +7,8 @@
 
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import app from "./routes.js";
 import { getDb, closeDb } from "./db.js";
@@ -45,7 +46,25 @@ async function request(
 process.env.DMS_DB_PATH = ":memory:";
 
 describe("DMS Server Routes", () => {
+  // Guard: the tests must not touch a real dms.db next to the code, neither
+  // create one nor write into one a developer keeps here on purpose (that
+  // in-place write is how a snooze leaked into the next run). Fingerprint
+  // the file and its WAL/SHM siblings before, compare after (Tyto, #24).
+  const dbFiles = ["dms.db", "dms.db-wal", "dms.db-shm"].map((f) =>
+    join(process.cwd(), f),
+  );
+  const fingerprint = () =>
+    dbFiles
+      .map((f) =>
+        existsSync(f)
+          ? `${f}:${createHash("sha256").update(readFileSync(f)).digest("hex")}`
+          : `${f}:-`,
+      )
+      .join("\n");
+  let before0 = "";
+
   before(() => {
+    before0 = fingerprint();
     // Initialize DB + register test agent
     getDb();
     registerAgent(TEST_AGENT_ID, TEST_AGENT_NAME, TEST_SECRET, 72);
@@ -56,9 +75,10 @@ describe("DMS Server Routes", () => {
     // The tests must never write a real database next to the code: a stray
     // dms.db leaked snoozes into the next run (Tyto, review #23). CI runs
     // from dms-server/, so cwd is the folder to check.
-    assert.ok(
-      !existsSync(join(process.cwd(), "dms.db")),
-      "tests wrote a real dms.db",
+    assert.equal(
+      fingerprint(),
+      before0,
+      "tests created or wrote a real dms.db (or its -wal/-shm)",
     );
   });
 
