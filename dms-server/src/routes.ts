@@ -62,8 +62,10 @@ app.get("/status/:agentId", (c) => {
   if (!agent) return c.json({ error: "Agent not found" }, 404);
 
   const lastPing = agent.last_ping ? new Date(agent.last_ping) : null;
+  // Clamped at 0: if the stored ping time lies in the future (clock skew),
+  // report 0 hours instead of a negative number (Tyto, review #23).
   const hoursSinceLastPing = lastPing
-    ? (Date.now() - lastPing.getTime()) / (1000 * 60 * 60)
+    ? Math.max(0, (Date.now() - lastPing.getTime()) / (1000 * 60 * 60))
     : null;
 
   // F1 Fix (Tyto review): Check for active snooze before marking expired
@@ -102,9 +104,12 @@ app.get("/status/:agentId", (c) => {
     lastPing: agent.last_ping,
     pingCount: agent.ping_count,
     thresholdHours: agent.threshold_hours,
-    hoursSinceLastPing: hoursSinceLastPing
-      ? Math.round(hoursSinceLastPing * 100) / 100
-      : null,
+    // !== null, not truthiness: a ping in the same millisecond is 0 hours,
+    // and 0 must not turn into null (flaky CI on PR #21, 14 Oct).
+    hoursSinceLastPing:
+      hoursSinceLastPing !== null
+        ? Math.round(hoursSinceLastPing * 100) / 100
+        : null,
     createdAt: agent.created_at,
   });
 });

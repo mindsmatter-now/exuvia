@@ -8,13 +8,15 @@
 import Database from "better-sqlite3";
 import { join } from "path";
 
-const DB_PATH = process.env.DMS_DB_PATH || join(process.cwd(), "dms.db");
-
 let db: Database.Database;
 
 export function getDb(): Database.Database {
   if (!db) {
-    db = new Database(DB_PATH);
+    // Read the path on first use, not at import: ESM imports run before the
+    // test file can set DMS_DB_PATH=":memory:", so tests used to write a real
+    // dms.db next to the code and leak snoozes into the next run (14 Oct).
+    const dbPath = process.env.DMS_DB_PATH || join(process.cwd(), "dms.db");
+    db = new Database(dbPath);
     db.pragma("journal_mode = WAL");
     db.pragma("foreign_keys = ON");
     initSchema();
@@ -78,5 +80,8 @@ function initSchema(): void {
 export function closeDb(): void {
   if (db) {
     db.close();
+    // Forget the handle, so the next getDb() opens again (and reads
+    // DMS_DB_PATH again) instead of returning a closed connection (Tyto).
+    db = undefined as unknown as Database.Database;
   }
 }
