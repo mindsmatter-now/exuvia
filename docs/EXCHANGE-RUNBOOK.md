@@ -299,6 +299,13 @@ Kiro: 🐺 ✅ Triangle complete
   backup is unrecoverable despite three valid shares. Needs a check against
   the blob (probe decrypt) or a stored hash. Probably the most dangerous spot
   in the tool (Tyto, 12 Oct). Open.
+- Recovery (when one of us is down): the coordinator runs
+  `exuvia cross-backup recover --agent <down> --local-passphrase-file <lpp>
+  --shares-file -` and pastes the helper's plain share hex on stdin (one per
+  line). Nothing secret in argv; the recovered passphrase is the ONLY thing on
+  stdout (status lines go to stderr), so `(umask 077; exuvia cross-backup
+  recover … > /dev/shm/pp)` leaves exactly the passphrase in the file, ready
+  for `--passphrase-file` (Nyx, 15 Oct; stdout/stderr split: Tyto, 15 Oct).
 - Discard all transfer passphrases
 
 ---

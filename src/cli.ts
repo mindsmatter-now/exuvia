@@ -104,8 +104,9 @@ Usage:
   exuvia cross-backup rotate --passphrase <pp> --local-passphrase-file <file|->   (or --local-passphrase <lpp>; "-" = stdin)
     Rotate shares (re-split with new Shamir).
 
-  exuvia cross-backup recover --agent <id> --local-passphrase <lpp> --shares <hex1,hex2>
-    Recover a downed agent's passphrase from shares.
+  exuvia cross-backup recover --agent <id> --local-passphrase-file <file|-> --shares-file <file|->
+    (or --local-passphrase <lpp> / --shares <hex1,hex2>; "-" = stdin, at most one)
+    Recover a downed agent's passphrase from shares. --shares-file: one hex per line.
 
   exuvia version
     Show version.
@@ -521,14 +522,14 @@ async function shamirRecover(args: string[]) {
   }
 
   const shares = hexShares.map(hexToShare);
-  log(`🔐 Reconstructing passphrase from ${shares.length} shares...\n`);
+  info(`🔐 Reconstructing passphrase from ${shares.length} shares...\n`);
 
   const passphrase = await combineShares(shares);
 
   // F7: Don't print passphrase to terminal scrollback
-  log("   ✅ Passphrase recovered successfully.");
-  log("   Writing to /dev/stdout without newline (pipe-safe)...");
-  log(
+  info("   ✅ Passphrase recovered successfully.");
+  info("   Writing to /dev/stdout without newline (pipe-safe)...");
+  info(
     "   Tip: pipe to a file or use: exuvia shamir-recover <s1> <s2> > /tmp/pp.txt\n",
   );
   process.stdout.write(passphrase);
@@ -1074,21 +1075,30 @@ async function crossBackupRotateCmd(args: string[]): Promise<void> {
 
 async function crossBackupRecoverCmd(args: string[]): Promise<void> {
   const agentId = getArg(args, "--agent");
-  const localPassphrase = getArg(args, "--local-passphrase");
-  const sharesArg = getArg(args, "--shares");
   const stateDir = getArg(args, "--state-dir") || ".";
 
-  if (!agentId || !localPassphrase || !sharesArg) {
-    console.error("❌ --agent, --local-passphrase, and --shares required");
-    console.error(
-      "   --shares: comma-separated plaintext share hex strings from other partners",
-    );
+  if (!agentId) {
+    console.error("❌ --agent required");
     process.exit(1);
   }
+  // Same guards as receive/status/rotate: secrets from a file or stdin ("-")
+  // instead of argv, both flags → exit 1, empty → exit 1, open file → warning.
+  // --shares-file: one share hex per line (or comma-separated).
+  assertSingleStdin(args);
+  const localPassphrase = resolveLocalPassphrase(args);
+  const sharesArg = resolveSecretArg(
+    args,
+    "--shares-file",
+    "--shares",
+    "Shares",
+  );
 
-  const additionalShares = sharesArg.split(",").map((s) => s.trim());
+  const additionalShares = sharesArg
+    .split(/[,\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 
-  log(`🔺 Recovering ${agentId}...\n`);
+  info(`🔺 Recovering ${agentId}...\n`);
 
   try {
     const result = await crossBackupRecover(
@@ -1097,10 +1107,10 @@ async function crossBackupRecoverCmd(args: string[]): Promise<void> {
       additionalShares,
       stateDir,
     );
-    log(`✅ Recovery successful!`);
-    log(`   Agent: ${result.agentId}`);
-    log(`   Shares used: ${result.sharesUsed}`);
-    log(`\n   ⚠️  Passphrase written to stdout (pipe to file):`);
+    info(`✅ Recovery successful!`);
+    info(`   Agent: ${result.agentId}`);
+    info(`   Shares used: ${result.sharesUsed}`);
+    info(`\n   ⚠️  Passphrase written to stdout (pipe to file):`);
     process.stdout.write(result.passphrase);
   } catch (e: any) {
     console.error(`❌ Recovery failed: ${e.message}`);
@@ -1114,6 +1124,11 @@ const [command, ...args] = process.argv.slice(2);
 const QUIET = args.includes("--quiet") || args.includes("-q");
 const log = (...a: any[]) => {
   if (!QUIET) console.log(...a);
+};
+// Status lines of commands whose stdout IS the secret (recover, shamir-recover)
+// go to stderr, so `cmd > file` leaves exactly the passphrase in the file (Tyto, 15 Oct).
+const info = (...a: any[]) => {
+  if (!QUIET) console.error(...a);
 };
 
 switch (command) {
