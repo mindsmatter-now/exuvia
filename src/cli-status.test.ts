@@ -660,3 +660,102 @@ describe("cross-backup init: same local-passphrase guards as receive (Kiro, revi
     assert.ok(existsSync(state()));
   });
 });
+
+describe("cross-backup recover --local-passphrase-file / --shares-file", () => {
+  let dir: string;
+  let nyxDir: string;
+  let kiroHex: string;
+  const SECRET = "RecoverCli!2026";
+
+  function runRecover(args: string[], input?: string) {
+    const r = spawnSync(
+      process.execPath,
+      [
+        CLI,
+        "cross-backup",
+        "recover",
+        "--agent",
+        "nyx",
+        "--state-dir",
+        dir,
+        ...args,
+      ],
+      { encoding: "utf8", timeout: 30000, input },
+    );
+    return { code: r.status, stdout: r.stdout, out: `${r.stdout}${r.stderr}` };
+  }
+
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-cli-recover-"));
+    nyxDir = mkdtempSync(join(tmpdir(), "exuvia-cli-recover-nyx-"));
+    const res = await init("nyx", ["tyto", "kiro"], SECRET, "nyx-key", nyxDir);
+    const t = res.sharesToSend.get("tyto")!;
+    kiroHex = res.sharesToSend.get("kiro")!.hex;
+    receiveShare("nyx", t.hex, t.hash, "tyto-key", undefined, dir);
+    writeFileSync(join(dir, "lpp"), "tyto-key\n", { mode: 0o600 });
+    writeFileSync(join(dir, "shares"), kiroHex + "\n", { mode: 0o600 });
+    writeFileSync(join(dir, "shares-empty"), "\n \n", { mode: 0o600 });
+  });
+
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(nyxDir, { recursive: true, force: true });
+  });
+
+  it("both from files -> passphrase on stdout, no secret in argv", () => {
+    const args = [
+      "--local-passphrase-file",
+      join(dir, "lpp"),
+      "--shares-file",
+      join(dir, "shares"),
+    ];
+    assert.ok(!args.includes(kiroHex) && !args.includes("tyto-key"));
+    const r = runRecover(args);
+    assert.equal(r.code, 0, r.out);
+    assert.ok(r.stdout.endsWith(SECRET), r.out);
+  });
+
+  it("shares from stdin -> recovers", () => {
+    const r = runRecover(
+      ["--local-passphrase-file", join(dir, "lpp"), "--shares-file", "-"],
+      kiroHex + "\n",
+    );
+    assert.equal(r.code, 0, r.out);
+    assert.ok(r.stdout.endsWith(SECRET), r.out);
+  });
+
+  it("empty shares file -> exit 1, no passphrase", () => {
+    const r = runRecover([
+      "--local-passphrase-file",
+      join(dir, "lpp"),
+      "--shares-file",
+      join(dir, "shares-empty"),
+    ]);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /Shares file is empty/);
+    assert.ok(!r.out.includes(SECRET));
+  });
+
+  it("--shares-file and --shares together -> exit 1", () => {
+    const r = runRecover([
+      "--local-passphrase-file",
+      join(dir, "lpp"),
+      "--shares-file",
+      join(dir, "shares"),
+      "--shares",
+      kiroHex,
+    ]);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /both given/);
+    assert.ok(!r.out.includes(SECRET));
+  });
+
+  it("two secrets from stdin -> exit 1", () => {
+    const r = runRecover(
+      ["--local-passphrase-file", "-", "--shares-file", "-"],
+      "tyto-key\n",
+    );
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /only one secret can come from stdin/);
+  });
+});

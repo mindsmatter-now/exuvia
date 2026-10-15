@@ -104,8 +104,9 @@ Usage:
   exuvia cross-backup rotate --passphrase <pp> --local-passphrase-file <file|->   (or --local-passphrase <lpp>; "-" = stdin)
     Rotate shares (re-split with new Shamir).
 
-  exuvia cross-backup recover --agent <id> --local-passphrase <lpp> --shares <hex1,hex2>
-    Recover a downed agent's passphrase from shares.
+  exuvia cross-backup recover --agent <id> --local-passphrase-file <file|-> --shares-file <file|->
+    (or --local-passphrase <lpp> / --shares <hex1,hex2>; "-" = stdin, at most one)
+    Recover a downed agent's passphrase from shares. --shares-file: one hex per line.
 
   exuvia version
     Show version.
@@ -1074,19 +1075,28 @@ async function crossBackupRotateCmd(args: string[]): Promise<void> {
 
 async function crossBackupRecoverCmd(args: string[]): Promise<void> {
   const agentId = getArg(args, "--agent");
-  const localPassphrase = getArg(args, "--local-passphrase");
-  const sharesArg = getArg(args, "--shares");
   const stateDir = getArg(args, "--state-dir") || ".";
 
-  if (!agentId || !localPassphrase || !sharesArg) {
-    console.error("❌ --agent, --local-passphrase, and --shares required");
-    console.error(
-      "   --shares: comma-separated plaintext share hex strings from other partners",
-    );
+  if (!agentId) {
+    console.error("❌ --agent required");
     process.exit(1);
   }
+  // Same guards as receive/status/rotate: secrets from a file or stdin ("-")
+  // instead of argv, both flags → exit 1, empty → exit 1, open file → warning.
+  // --shares-file: one share hex per line (or comma-separated).
+  assertSingleStdin(args);
+  const localPassphrase = resolveLocalPassphrase(args);
+  const sharesArg = resolveSecretArg(
+    args,
+    "--shares-file",
+    "--shares",
+    "Shares",
+  );
 
-  const additionalShares = sharesArg.split(",").map((s) => s.trim());
+  const additionalShares = sharesArg
+    .split(/[,\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   log(`🔺 Recovering ${agentId}...\n`);
 
