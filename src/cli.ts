@@ -522,14 +522,14 @@ async function shamirRecover(args: string[]) {
   }
 
   const shares = hexShares.map(hexToShare);
-  log(`🔐 Reconstructing passphrase from ${shares.length} shares...\n`);
+  info(`🔐 Reconstructing passphrase from ${shares.length} shares...\n`);
 
   const passphrase = await combineShares(shares);
 
   // F7: Don't print passphrase to terminal scrollback
-  log("   ✅ Passphrase recovered successfully.");
-  log("   Writing to /dev/stdout without newline (pipe-safe)...");
-  log(
+  info("   ✅ Passphrase recovered successfully.");
+  info("   Writing to /dev/stdout without newline (pipe-safe)...");
+  info(
     "   Tip: pipe to a file or use: exuvia shamir-recover <s1> <s2> > /tmp/pp.txt\n",
   );
   process.stdout.write(passphrase);
@@ -1098,7 +1098,7 @@ async function crossBackupRecoverCmd(args: string[]): Promise<void> {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  log(`🔺 Recovering ${agentId}...\n`);
+  info(`🔺 Recovering ${agentId}...\n`);
 
   try {
     const result = await crossBackupRecover(
@@ -1107,10 +1107,10 @@ async function crossBackupRecoverCmd(args: string[]): Promise<void> {
       additionalShares,
       stateDir,
     );
-    log(`✅ Recovery successful!`);
-    log(`   Agent: ${result.agentId}`);
-    log(`   Shares used: ${result.sharesUsed}`);
-    log(`\n   ⚠️  Passphrase written to stdout (pipe to file):`);
+    info(`✅ Recovery successful!`);
+    info(`   Agent: ${result.agentId}`);
+    info(`   Shares used: ${result.sharesUsed}`);
+    info(`\n   ⚠️  Passphrase written to stdout (pipe to file):`);
     process.stdout.write(result.passphrase);
   } catch (e: any) {
     console.error(`❌ Recovery failed: ${e.message}`);
@@ -1124,6 +1124,11 @@ const [command, ...args] = process.argv.slice(2);
 const QUIET = args.includes("--quiet") || args.includes("-q");
 const log = (...a: any[]) => {
   if (!QUIET) console.log(...a);
+};
+// Status lines of commands whose stdout IS the secret (recover, shamir-recover)
+// go to stderr, so `cmd > file` leaves exactly the passphrase in the file (Tyto, 15 Oct).
+const info = (...a: any[]) => {
+  if (!QUIET) console.error(...a);
 };
 
 switch (command) {

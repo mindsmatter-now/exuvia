@@ -712,7 +712,7 @@ describe("cross-backup recover --local-passphrase-file / --shares-file", () => {
     assert.ok(!args.includes(kiroHex) && !args.includes("tyto-key"));
     const r = runRecover(args);
     assert.equal(r.code, 0, r.out);
-    assert.ok(r.stdout.endsWith(SECRET), r.out);
+    assert.equal(r.stdout, SECRET, r.out); // stdout = exactly the passphrase (pipe-safe)
   });
 
   it("shares from stdin -> recovers", () => {
@@ -721,7 +721,22 @@ describe("cross-backup recover --local-passphrase-file / --shares-file", () => {
       kiroHex + "\n",
     );
     assert.equal(r.code, 0, r.out);
-    assert.ok(r.stdout.endsWith(SECRET), r.out);
+    assert.equal(r.stdout, SECRET, r.out); // stdout = exactly the passphrase (pipe-safe)
+  });
+
+  it("redirected to a file -> file content === passphrase (status lines on stderr)", () => {
+    const out = join(dir, "pp-out");
+    const r = spawnSync(
+      "sh",
+      [
+        "-c",
+        `"${process.execPath}" "${CLI}" cross-backup recover --agent nyx --state-dir "${dir}" --local-passphrase-file "${join(dir, "lpp")}" --shares-file "${join(dir, "shares")}" > "${out}"`,
+      ],
+      { encoding: "utf8", timeout: 30000 },
+    );
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(out, "utf8"), SECRET);
+    assert.match(r.stderr, /Recovery successful/);
   });
 
   it("empty shares file -> exit 1, no passphrase", () => {
