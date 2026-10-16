@@ -440,6 +440,40 @@ describe("cross-backup — rotate", () => {
     rmSync(tmpDir2, { recursive: true, force: true });
   });
 
+  // Tyto, 12 Oct: rotate must refuse a --passphrase that is not the identity
+  // passphrase the current shares protect (typo = unrecoverable backup).
+  it("refuses a wrong --passphrase, state byte-identical", async () => {
+    const { rotate } = await import("./cross-backup.js");
+    const dir = mkdtempSync(join(tmpdir(), "exuvia-rot-wrongpp-"));
+    await init("nyx", ["tyto", "kiro"], "RealIdentity!", "key", dir);
+    const before = readFileSync(join(dir, ".exuvia-cross-backup.json"), "utf8");
+    await assert.rejects(
+      () => rotate("RealIdentlty!", "key", dir),
+      /not the identity passphrase/,
+    );
+    const after = readFileSync(join(dir, ".exuvia-cross-backup.json"), "utf8");
+    assert.equal(after, before);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("refuses when too few stored shares decrypt to verify", async () => {
+    const { rotate } = await import("./cross-backup.js");
+    const dir = mkdtempSync(join(tmpdir(), "exuvia-rot-fewshares-"));
+    await init("nyx", ["tyto", "kiro"], "RealIdentity!", "key", dir);
+    const f = join(dir, ".exuvia-cross-backup.json");
+    const st = JSON.parse(readFileSync(f, "utf8"));
+    // break both partner entries: only the local share is left (1 < threshold 2)
+    for (const p of st.partners) p.shareHash = "0".repeat(64);
+    writeFileSync(f, JSON.stringify(st, null, 2));
+    const before = readFileSync(f, "utf8");
+    await assert.rejects(
+      () => rotate("RealIdentity!", "key", dir),
+      /only 1 of 2 stored shares decrypt/,
+    );
+    assert.equal(readFileSync(f, "utf8"), before);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("should throw if no state exists", async () => {
     const { rotate } = await import("./cross-backup.js");
     await assert.rejects(

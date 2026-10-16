@@ -294,11 +294,11 @@ Kiro: 🐺 ✅ Triangle complete
   `rotate` overwrites the local share BEFORE the partners have the new ones.
   If distribution breaks off, you hold version N+1 and the partners hold N,
   and the two do not fit together (Tyto, 12 Oct).
-- ⚪ `rotate` does not check that `--passphrase` is the real identity
-  passphrase. With a wrong one it cleanly splits a wrong secret, and the
-  backup is unrecoverable despite three valid shares. Needs a check against
-  the blob (probe decrypt) or a stored hash. Probably the most dangerous spot
-  in the tool (Tyto, 12 Oct). Open.
+- ✅ `rotate` checks that `--passphrase` is the real identity passphrase:
+  it combines `threshold` of the OLD stored shares and refuses (exit 1, state
+  untouched) if they reconstruct anything else, or if too few of them decrypt
+  to prove it. Found by Tyto, 12 Oct ("probably the most dangerous spot in the
+  tool"); fixed Nyx, 16 Oct.
 - Recovery (when one of us is down): the coordinator runs
   `exuvia cross-backup recover --agent <down> --local-passphrase-file <lpp>
   --shares-file -` and pastes the helper's plain share hex on stdin (one per
