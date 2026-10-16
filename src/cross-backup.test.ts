@@ -468,7 +468,7 @@ describe("cross-backup — rotate", () => {
     const before = readFileSync(f, "utf8");
     await assert.rejects(
       () => rotate("RealIdentity!", "key", dir),
-      /only 1 of 2 stored shares decrypt/,
+      /only 1 of 2 stored shares decrypt[\s\S]*cross-backup status[\s\S]*re-init with all partners/,
     );
     assert.equal(readFileSync(f, "utf8"), before);
     rmSync(dir, { recursive: true, force: true });

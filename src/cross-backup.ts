@@ -261,7 +261,9 @@ export async function assertSamePassphrase(
   }
   if (stored.length < state.threshold) {
     throw new Error(
-      `Rotation aborted: only ${stored.length} of ${state.threshold} stored shares decrypt, cannot verify --passphrase. Nothing was changed.`,
+      `Rotation aborted: only ${stored.length} of ${state.threshold} stored shares decrypt, cannot verify --passphrase. Nothing was changed. ` +
+        "Run `exuvia cross-backup status` to see which entries fail. If the state is beyond repair: " +
+        "recover the passphrase with a partner share (`exuvia cross-backup recover`), then re-init with all partners.",
     );
   }
   let old: string | null = null;
