@@ -236,6 +236,51 @@ function subsets(n: number, k: number): number[][] {
 }
 
 /**
+ * The stored (old) shares must reconstruct exactly `passphrase`. Throws before
+ * anything is written if they reconstruct something else, or if there are not
+ * enough decryptable stored shares to check (then we cannot prove it → refuse).
+ */
+export async function assertSamePassphrase(
+  state: CrossBackupState,
+  localPassphrase: string,
+  passphrase: string,
+): Promise<void> {
+  const stored: Uint8Array[] = [];
+  const all = [
+    { shareHex: state.localShareHex, shareHash: state.localShareHash },
+    ...state.partners,
+  ];
+  for (const p of all) {
+    if (stored.length >= state.threshold) break;
+    try {
+      const hex = decryptShare(p.shareHex, localPassphrase);
+      if (hashShare(hex) === p.shareHash) stored.push(hexToShare(hex));
+    } catch {
+      /* undecryptable entry: not counted */
+    }
+  }
+  if (stored.length < state.threshold) {
+    throw new Error(
+      `Rotation aborted: only ${stored.length} of ${state.threshold} stored shares decrypt, cannot verify --passphrase. Nothing was changed. ` +
+        "Run `exuvia cross-backup status` to see which entries fail. If the state is beyond repair: " +
+        "recover the passphrase with a partner share (`exuvia cross-backup recover`), then re-init with all partners.",
+    );
+  }
+  let old: string | null = null;
+  try {
+    old = await combineShares(stored);
+  } catch {
+    old = null;
+  }
+  if (old !== passphrase) {
+    throw new Error(
+      "Rotation aborted: --passphrase is not the identity passphrase the current shares protect. " +
+        "Splitting it would leave a backup that recovers the wrong secret. Nothing was changed.",
+    );
+  }
+}
+
+/**
  * Every threshold-sized subset of `shares` must combine to `passphrase`.
  * Throws naming the first failing subset. Used by rotate before it writes.
  */
@@ -580,6 +625,14 @@ export async function rotate(
   const partnerIds = state.partners.map((p) => p.id);
   const allHolders = [state.agentId, ...partnerIds];
   const threshold = state.threshold;
+
+  // Tyto, 12 Oct ("probably the most dangerous spot in the tool"): rotate never
+  // checked that --passphrase is the REAL identity passphrase. A typo split a
+  // wrong secret cleanly — three valid shares, unrecoverable backup. The old
+  // shares are all still in the state (encrypted with the local passphrase we
+  // just proved), so combine `threshold` of them and compare. No blob, no
+  // stored hash needed.
+  await assertSamePassphrase(state, localPassphrase, passphrase);
 
   // Re-split passphrase with same structure
   const shamir = await split(passphrase, allHolders, threshold);
