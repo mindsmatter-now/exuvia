@@ -78,17 +78,20 @@ const STATE_FILE = ".exuvia-cross-backup.json";
 const CROSS_BACKUP_CIPHER = "aes-256-gcm";
 
 // scrypt params — matches crypto.ts (Tyto: scrypt from day 1, not SHA-256)
-const SCRYPT_PARAMS_PROD = {
+export const SCRYPT_PARAMS_PROD = {
   N: 131072, // 2^17
   r: 8,
   p: 1,
   maxmem: 256 * 1024 * 1024,
 };
 const SCRYPT_PARAMS_TEST = { N: 1024, r: 8, p: 1, maxmem: 256 * 1024 * 1024 };
-const SCRYPT_PARAMS =
-  process.env.EXUVIA_TEST_MODE === "1"
-    ? SCRYPT_PARAMS_TEST
-    : SCRYPT_PARAMS_PROD;
+/** Which scrypt params a given environment selects. Only EXUVIA_TEST_MODE=1 lowers them. */
+export function scryptParamsFor(
+  env: NodeJS.ProcessEnv,
+): typeof SCRYPT_PARAMS_PROD {
+  return env.EXUVIA_TEST_MODE === "1" ? SCRYPT_PARAMS_TEST : SCRYPT_PARAMS_PROD;
+}
+const SCRYPT_PARAMS = scryptParamsFor(process.env);
 
 function deriveShareKey(passphrase: string, salt: Buffer): Buffer {
   return scryptSync(passphrase, salt, 32, SCRYPT_PARAMS);
