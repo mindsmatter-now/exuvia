@@ -886,3 +886,16 @@ describe("cross-backup — round-trip decrypt check", () => {
     }
   });
 });
+
+describe("scrypt params (tests run with EXUVIA_TEST_MODE=1, production must not)", () => {
+  it("production keeps N=2^17, only EXUVIA_TEST_MODE=1 lowers it", async () => {
+    const { scryptParamsFor, SCRYPT_PARAMS_PROD } =
+      await import("./cross-backup.js");
+    assert.equal(SCRYPT_PARAMS_PROD.N, 2 ** 17);
+    assert.equal(SCRYPT_PARAMS_PROD.r, 8);
+    assert.equal(scryptParamsFor({}).N, 2 ** 17);
+    assert.equal(scryptParamsFor({ EXUVIA_TEST_MODE: "0" }).N, 2 ** 17);
+    assert.equal(scryptParamsFor({ EXUVIA_TEST_MODE: "true" }).N, 2 ** 17);
+    assert.ok(scryptParamsFor({ EXUVIA_TEST_MODE: "1" }).N < 2 ** 17);
+  });
+});

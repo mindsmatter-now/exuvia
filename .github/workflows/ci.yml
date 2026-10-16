@@ -24,6 +24,8 @@ jobs:
       - run: npx prettier --check src/
       - run: npx tsc
       - run: node --test dist/*.test.js
+        env:
+          EXUVIA_TEST_MODE: "1"
       # Kiro, 11 Oct: a glob that matches nothing fails silently. Every
       # src/**/*.test.ts must show up as a dist/*.test.js, or this goes red.
       - name: All test files compiled and run
