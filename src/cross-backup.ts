@@ -18,6 +18,7 @@ import {
   existsSync,
   chmodSync,
   openSync,
+  writeSync,
   fsyncSync,
   closeSync,
   renameSync,
@@ -206,11 +207,13 @@ export function loadState(stateDir: string = "."): CrossBackupState | null {
 }
 
 /**
- * Low-level write used by saveState. Tests pass their own to simulate a
- * crash mid-write (issue #17); production always uses fs.writeFileSync(fd).
+ * Low-level write used by saveState, same contract as fs.writeSync(fd, buf,
+ * off, len): returns how many bytes landed and may write SHORT without
+ * throwing (Kiro, review #29: full disk / ulimit -f). Tests pass their own to
+ * simulate short writes and crashes mid-write (issue #17).
  */
 export interface SaveStateIo {
-  write?: (fd: number, content: string) => void;
+  write?: (fd: number, buf: Buffer, offset: number, length: number) => number;
 }
 
 /**
@@ -511,20 +514,27 @@ export function receiveShare(
  * content is never in a 0644 file, and a crash mid-write leaves the old file
  * intact instead of truncating every received share.
  */
-function writePrivateAtomic(
+export function writePrivateAtomic(
   path: string,
   content: string,
-  write: (fd: number, content: string) => void = (fd, c) => {
-    // writeFileSync on an fd loops until every byte is written; a bare
-    // writeSync may write short and nobody checked its return (Tyto, review #29)
-    writeFileSync(fd, c);
-  },
+  write: (fd: number, buf: Buffer, offset: number, length: number) => number = writeSync,
 ): void {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
   const fd = openSync(tmp, "wx", 0o600);
   try {
     try {
-      write(fd, content);
+      // writeSync may write short and return the count WITHOUT throwing
+      // (Kiro, review #29). Loop until every byte is down; the next call then
+      // raises the real ENOSPC/EFBIG instead of renaming a truncated file.
+      const buf = Buffer.from(content, "utf8");
+      let off = 0;
+      while (off < buf.length) {
+        const n = write(fd, buf, off, buf.length - off);
+        if (!Number.isInteger(n) || n <= 0) {
+          throw new Error(`short write: ${off}/${buf.length} bytes, then ${n}`);
+        }
+        off += n;
+      }
       fsyncSync(fd);
     } finally {
       closeSync(fd);
