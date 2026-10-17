@@ -517,7 +517,12 @@ export function receiveShare(
 export function writePrivateAtomic(
   path: string,
   content: string,
-  write: (fd: number, buf: Buffer, offset: number, length: number) => number = writeSync,
+  write: (
+    fd: number,
+    buf: Buffer,
+    offset: number,
+    length: number,
+  ) => number = writeSync,
 ): void {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
   const fd = openSync(tmp, "wx", 0o600);

@@ -954,8 +954,15 @@ describe("cross-backup — saveState is atomic (issue #17)", () => {
           return fsWriteSync(fd, buf, off, Math.max(1, Math.floor(len / 2)));
         },
       });
-      assert.ok(calls > 1, "the manipulation must have landed (several short writes)");
-      assert.equal(loadState(dir)!.version, 42, "state must be complete, valid JSON");
+      assert.ok(
+        calls > 1,
+        "the manipulation must have landed (several short writes)",
+      );
+      assert.equal(
+        loadState(dir)!.version,
+        42,
+        "state must be complete, valid JSON",
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -974,15 +981,23 @@ describe("cross-backup — saveState is atomic (issue #17)", () => {
         () =>
           saveState(state, dir, {
             write: (fd, buf, off, len) => {
-              if (++calls === 1) return fsWriteSync(fd, buf, off, Math.floor(len / 2));
+              if (++calls === 1)
+                return fsWriteSync(fd, buf, off, Math.floor(len / 2));
               throw new Error("ENOSPC: no space left on device");
             },
           }),
         /ENOSPC/,
       );
-      assert.equal(calls, 2, "the second call must have been made (no silent rename after the short write)");
+      assert.equal(
+        calls,
+        2,
+        "the second call must have been made (no silent rename after the short write)",
+      );
       assert.equal(sha(file), before, "original state must be untouched");
-      assert.deepEqual(readdirSync(dir).filter((f) => f.includes(".tmp-")), []);
+      assert.deepEqual(
+        readdirSync(dir).filter((f) => f.includes(".tmp-")),
+        [],
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -994,9 +1009,15 @@ describe("cross-backup — saveState is atomic (issue #17)", () => {
       await init("nyx", ["tyto", "kiro"], "id-pass", "local-pass", dir);
       const file = join(dir, ".exuvia-cross-backup.json");
       const before = sha(file);
-      assert.throws(() => saveState(loadState(dir)!, dir, { write: () => 0 }), /short write/);
+      assert.throws(
+        () => saveState(loadState(dir)!, dir, { write: () => 0 }),
+        /short write/,
+      );
       assert.equal(sha(file), before);
-      assert.deepEqual(readdirSync(dir).filter((f) => f.includes(".tmp-")), []);
+      assert.deepEqual(
+        readdirSync(dir).filter((f) => f.includes(".tmp-")),
+        [],
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1013,13 +1034,28 @@ describe("cross-backup — saveState is atomic (issue #17)", () => {
         `const m = require(${JSON.stringify(mod)});` +
         `const s = m.loadState(${JSON.stringify(dir)}); s.pad = "x".repeat(5_000_000);` +
         `try { m.saveState(s, ${JSON.stringify(dir)}); process.exit(0); } catch (e) { console.error(e.code || e.message); process.exit(1); }`;
-      const r = spawnSync("bash", ["-c", `ulimit -f 1000; exec "${process.execPath}" -e "$0"`, script], {
-        encoding: "utf8",
-        env: { ...process.env },
-      });
-      assert.equal(r.status, 1, `saveState must fail under ulimit -f, got ${r.status}: ${r.stderr}`);
-      assert.equal(sha(file), before, "a truncated file must never replace the good state");
-      assert.deepEqual(readdirSync(dir).filter((f) => f.includes(".tmp-")), []);
+      const r = spawnSync(
+        "bash",
+        ["-c", `ulimit -f 1000; exec "${process.execPath}" -e "$0"`, script],
+        {
+          encoding: "utf8",
+          env: { ...process.env },
+        },
+      );
+      assert.equal(
+        r.status,
+        1,
+        `saveState must fail under ulimit -f, got ${r.status}: ${r.stderr}`,
+      );
+      assert.equal(
+        sha(file),
+        before,
+        "a truncated file must never replace the good state",
+      );
+      assert.deepEqual(
+        readdirSync(dir).filter((f) => f.includes(".tmp-")),
+        [],
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
