@@ -206,13 +206,30 @@ export function loadState(stateDir: string = "."): CrossBackupState | null {
   return raw as CrossBackupState;
 }
 
+/**
+ * Low-level write used by saveState, same contract as fs.writeSync(fd, buf,
+ * off, len): returns how many bytes landed and may write SHORT without
+ * throwing (Kiro, review #29: full disk / ulimit -f). Tests pass their own to
+ * simulate short writes and crashes mid-write (issue #17).
+ */
+export interface SaveStateIo {
+  write?: (fd: number, buf: Buffer, offset: number, length: number) => number;
+}
+
+/**
+ * Persist the state atomically (issue #17, Tyto in review #15): temp file
+ * 0600 → fsync → rename over the original. A crash or a full disk while
+ * writing leaves the previous state byte-identical instead of truncating it
+ * after `rotate` has already thrown the old shares away.
+ */
 export function saveState(
   state: CrossBackupState,
   stateDir: string = ".",
+  io: SaveStateIo = {},
 ): void {
   state.updatedAt = new Date().toISOString();
   const path = `${stateDir}/${STATE_FILE}`;
-  writeFileSync(path, JSON.stringify(state, null, 2));
+  writePrivateAtomic(path, JSON.stringify(state, null, 2), io.write);
 }
 
 // ── Round-trip check (Kiro 🐺: only a real decrypt proves the passphrase) ──
@@ -497,12 +514,32 @@ export function receiveShare(
  * content is never in a 0644 file, and a crash mid-write leaves the old file
  * intact instead of truncating every received share.
  */
-function writePrivateAtomic(path: string, content: string): void {
+export function writePrivateAtomic(
+  path: string,
+  content: string,
+  write: (
+    fd: number,
+    buf: Buffer,
+    offset: number,
+    length: number,
+  ) => number = writeSync,
+): void {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
   const fd = openSync(tmp, "wx", 0o600);
   try {
     try {
-      writeSync(fd, content);
+      // writeSync may write short and return the count WITHOUT throwing
+      // (Kiro, review #29). Loop until every byte is down; the next call then
+      // raises the real ENOSPC/EFBIG instead of renaming a truncated file.
+      const buf = Buffer.from(content, "utf8");
+      let off = 0;
+      while (off < buf.length) {
+        const n = write(fd, buf, off, buf.length - off);
+        if (!Number.isInteger(n) || n <= 0) {
+          throw new Error(`short write: ${off}/${buf.length} bytes, then ${n}`);
+        }
+        off += n;
+      }
       fsyncSync(fd);
     } finally {
       closeSync(fd);

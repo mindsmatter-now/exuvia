@@ -13,9 +13,14 @@ import {
   existsSync,
   readFileSync,
   writeFileSync,
+  readdirSync,
+  statSync,
+  writeSync as fsWriteSync,
 } from "fs";
+import { createHash as testHash } from "crypto";
 import { tmpdir } from "os";
 import { join } from "path";
+import { spawnSync } from "child_process";
 import {
   init,
   receiveShare,
@@ -25,6 +30,7 @@ import {
   decryptShare,
   hashShare,
   loadState,
+  saveState,
   verifyStateDecrypts,
 } from "./cross-backup.js";
 
@@ -897,5 +903,176 @@ describe("scrypt params (tests run with EXUVIA_TEST_MODE=1, production must not)
     assert.equal(scryptParamsFor({ EXUVIA_TEST_MODE: "0" }).N, 2 ** 17);
     assert.equal(scryptParamsFor({ EXUVIA_TEST_MODE: "true" }).N, 2 ** 17);
     assert.ok(scryptParamsFor({ EXUVIA_TEST_MODE: "1" }).N < 2 ** 17);
+  });
+});
+
+describe("cross-backup — saveState is atomic (issue #17)", () => {
+  const sha = (p: string) =>
+    testHash("sha256").update(readFileSync(p)).digest("hex");
+
+  it("a crash mid-write leaves the old state byte-identical and no temp file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-atomic-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "id-pass", "local-pass", dir);
+      const file = join(dir, ".exuvia-cross-backup.json");
+      const before = sha(file);
+      const state = loadState(dir)!;
+      state.version = 99;
+      assert.throws(
+        () =>
+          saveState(state, dir, {
+            write: (fd, buf, off, len) => {
+              fsWriteSync(fd, buf, off, Math.floor(len / 2));
+              throw new Error("ENOSPC: simulated crash mid-write");
+            },
+          }),
+        /ENOSPC/,
+      );
+      assert.equal(sha(file), before, "original state must be untouched");
+      assert.equal(loadState(dir)!.version, 1);
+      assert.deepEqual(
+        readdirSync(dir).filter((f) => f.includes(".tmp-")),
+        [],
+        "no half-written temp copy of the shares may stay behind",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a short write that does NOT throw is completed by the loop (Kiro, review #29)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-atomic-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "id-pass", "local-pass", dir);
+      const state = loadState(dir)!;
+      state.version = 42;
+      let calls = 0;
+      saveState(state, dir, {
+        // like the kernel on a nearly full disk: half lands, no error
+        write: (fd, buf, off, len) => {
+          calls++;
+          return fsWriteSync(fd, buf, off, Math.max(1, Math.floor(len / 2)));
+        },
+      });
+      assert.ok(
+        calls > 1,
+        "the manipulation must have landed (several short writes)",
+      );
+      assert.equal(
+        loadState(dir)!.version,
+        42,
+        "state must be complete, valid JSON",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("short write, then ENOSPC on the next call: old state stays intact (Kiro, review #29)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-atomic-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "id-pass", "local-pass", dir);
+      const file = join(dir, ".exuvia-cross-backup.json");
+      const before = sha(file);
+      const state = loadState(dir)!;
+      state.version = 99;
+      let calls = 0;
+      assert.throws(
+        () =>
+          saveState(state, dir, {
+            write: (fd, buf, off, len) => {
+              if (++calls === 1)
+                return fsWriteSync(fd, buf, off, Math.floor(len / 2));
+              throw new Error("ENOSPC: no space left on device");
+            },
+          }),
+        /ENOSPC/,
+      );
+      assert.equal(
+        calls,
+        2,
+        "the second call must have been made (no silent rename after the short write)",
+      );
+      assert.equal(sha(file), before, "original state must be untouched");
+      assert.deepEqual(
+        readdirSync(dir).filter((f) => f.includes(".tmp-")),
+        [],
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a write that reports 0 bytes throws instead of looping forever", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-atomic-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "id-pass", "local-pass", dir);
+      const file = join(dir, ".exuvia-cross-backup.json");
+      const before = sha(file);
+      assert.throws(
+        () => saveState(loadState(dir)!, dir, { write: () => 0 }),
+        /short write/,
+      );
+      assert.equal(sha(file), before);
+      assert.deepEqual(
+        readdirSync(dir).filter((f) => f.includes(".tmp-")),
+        [],
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("real file-size limit (ulimit -f): EFBIG, old state intact (Kiro, review #29)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-atomic-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "id-pass", "local-pass", dir);
+      const file = join(dir, ".exuvia-cross-backup.json");
+      const before = sha(file);
+      const mod = join(__dirname, "cross-backup.js");
+      const script =
+        `const m = require(${JSON.stringify(mod)});` +
+        `const s = m.loadState(${JSON.stringify(dir)}); s.pad = "x".repeat(5_000_000);` +
+        `try { m.saveState(s, ${JSON.stringify(dir)}); process.exit(0); } catch (e) { console.error(e.code || e.message); process.exit(1); }`;
+      const r = spawnSync(
+        "bash",
+        ["-c", `ulimit -f 1000; exec "${process.execPath}" -e "$0"`, script],
+        {
+          encoding: "utf8",
+          env: { ...process.env },
+        },
+      );
+      assert.equal(
+        r.status,
+        1,
+        `saveState must fail under ulimit -f, got ${r.status}: ${r.stderr}`,
+      );
+      assert.equal(
+        sha(file),
+        before,
+        "a truncated file must never replace the good state",
+      );
+      assert.deepEqual(
+        readdirSync(dir).filter((f) => f.includes(".tmp-")),
+        [],
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a normal save replaces the file and keeps it 0600", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-atomic-"));
+    try {
+      await init("nyx", ["tyto", "kiro"], "id-pass", "local-pass", dir);
+      const state = loadState(dir)!;
+      state.version = 7;
+      saveState(state, dir);
+      const file = join(dir, ".exuvia-cross-backup.json");
+      assert.equal(loadState(dir)!.version, 7);
+      assert.equal(statSync(file).mode & 0o777, 0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
