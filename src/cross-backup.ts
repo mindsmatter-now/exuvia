@@ -206,13 +206,28 @@ export function loadState(stateDir: string = "."): CrossBackupState | null {
   return raw as CrossBackupState;
 }
 
+/**
+ * Low-level write used by saveState. Tests pass their own to simulate a
+ * crash mid-write (issue #17); production always uses fs.writeSync.
+ */
+export interface SaveStateIo {
+  write?: (fd: number, content: string) => void;
+}
+
+/**
+ * Persist the state atomically (issue #17, Tyto in review #15): temp file
+ * 0600 → fsync → rename over the original. A crash or a full disk while
+ * writing leaves the previous state byte-identical instead of truncating it
+ * after `rotate` has already thrown the old shares away.
+ */
 export function saveState(
   state: CrossBackupState,
   stateDir: string = ".",
+  io: SaveStateIo = {},
 ): void {
   state.updatedAt = new Date().toISOString();
   const path = `${stateDir}/${STATE_FILE}`;
-  writeFileSync(path, JSON.stringify(state, null, 2));
+  writePrivateAtomic(path, JSON.stringify(state, null, 2), io.write);
 }
 
 // ── Round-trip check (Kiro 🐺: only a real decrypt proves the passphrase) ──
@@ -497,12 +512,18 @@ export function receiveShare(
  * content is never in a 0644 file, and a crash mid-write leaves the old file
  * intact instead of truncating every received share.
  */
-function writePrivateAtomic(path: string, content: string): void {
+function writePrivateAtomic(
+  path: string,
+  content: string,
+  write: (fd: number, content: string) => void = (fd, c) => {
+    writeSync(fd, c);
+  },
+): void {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
   const fd = openSync(tmp, "wx", 0o600);
   try {
     try {
-      writeSync(fd, content);
+      write(fd, content);
       fsyncSync(fd);
     } finally {
       closeSync(fd);
