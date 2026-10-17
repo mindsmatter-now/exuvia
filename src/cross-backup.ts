@@ -18,7 +18,6 @@ import {
   existsSync,
   chmodSync,
   openSync,
-  writeSync,
   fsyncSync,
   closeSync,
   renameSync,
@@ -208,7 +207,7 @@ export function loadState(stateDir: string = "."): CrossBackupState | null {
 
 /**
  * Low-level write used by saveState. Tests pass their own to simulate a
- * crash mid-write (issue #17); production always uses fs.writeSync.
+ * crash mid-write (issue #17); production always uses fs.writeFileSync(fd).
  */
 export interface SaveStateIo {
   write?: (fd: number, content: string) => void;
@@ -516,7 +515,9 @@ function writePrivateAtomic(
   path: string,
   content: string,
   write: (fd: number, content: string) => void = (fd, c) => {
-    writeSync(fd, c);
+    // writeFileSync on an fd loops until every byte is written; a bare
+    // writeSync may write short and nobody checked its return (Tyto, review #29)
+    writeFileSync(fd, c);
   },
 ): void {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
