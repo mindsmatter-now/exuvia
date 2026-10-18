@@ -48,6 +48,7 @@ import {
   status as crossBackupStatus,
   rotate as crossBackupRotate,
   recover as crossBackupRecover,
+  writePrivateAtomic,
 } from "./cross-backup.js";
 import { join, dirname } from "path";
 import { createInterface } from "readline";
@@ -216,8 +217,14 @@ function loadState(workspace: string): StateFile | null {
   return JSON.parse(readFileSync(path, "utf-8"));
 }
 
+// Atomic like the cross-backup state (#17/#29): a crash or a full disk mid-write
+// leaves the previous state intact instead of a truncated JSON that breaks the
+// next backup's diff and the Arweave TX history.
 function saveState(workspace: string, state: StateFile): void {
-  writeFileSync(join(workspace, STATE_FILE), JSON.stringify(state, null, 2));
+  writePrivateAtomic(
+    join(workspace, STATE_FILE),
+    JSON.stringify(state, null, 2),
+  );
 }
 
 // --- Commands ---
