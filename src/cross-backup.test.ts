@@ -853,6 +853,39 @@ describe("cross-backup — init reads the local passphrase back from storage", (
     }
   });
 
+  it("a second init that fails its check leaves the old good state untouched (Kiro, 18 Oct)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "xb-kept-reinit-"));
+    const file = join(dir, "lpp.txt");
+    const sha = (p: string) =>
+      testHash("sha256").update(readFileSync(p)).digest("hex");
+    try {
+      writeFileSync(file, "local-good\n", { mode: 0o600 });
+      await init("nyx", ["tyto", "kiro"], "pp-main", "local-good", dir, () =>
+        readFileSync(file, "utf8"),
+      );
+      const state = join(dir, ".exuvia-cross-backup.json");
+      const before = sha(state);
+      // Kiro's probe: new passphrase, loader returns nothing.
+      await assert.rejects(
+        init("nyx", ["tyto", "kiro"], "pp-main", "local-new", dir, () => ""),
+        /could not be read back.*Nothing was written/,
+      );
+      assert.equal(sha(state), before, "old state must be byte-identical");
+      // And with a stored passphrase that does not match the one used.
+      await assert.rejects(
+        init("nyx", ["tyto", "kiro"], "pp-main", "local-new", dir, () =>
+          readFileSync(file, "utf8"),
+        ),
+        /cannot be decrypted/,
+      );
+      assert.equal(sha(state), before, "old state must be byte-identical");
+      // The old passphrase still opens it.
+      verifyStateDecrypts(loadState(dir)!, "local-good");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("fails when an empty passphrase was stored", async () => {
     const dir = mkdtempSync(join(tmpdir(), "xb-kept-empty-"));
     try {

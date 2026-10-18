@@ -458,11 +458,11 @@ export async function init(
     updatedAt: now,
   };
 
-  saveState(state, stateDir);
-  // Round-trip through the disk: what we just wrote must decrypt with the
-  // passphrase we were given (May 2026: init ran with a passphrase nobody kept).
-  const onDisk = loadState(stateDir);
-  if (!onDisk) throw new Error("init: state file vanished right after writing");
+  // Check BEFORE replacing anything (Kiro, review #7 follow-up, 18 Oct): a
+  // second init over a good state used to write first and fail afterwards,
+  // so the old, working file was already gone. Now the passphrase is read
+  // back from where it is KEPT and the new state must decrypt with it before
+  // saveState runs.
   let kept = localPassphrase;
   if (loadLocalPassphrase) {
     let loaded: string | undefined;
@@ -474,11 +474,18 @@ export async function init(
     if (!loaded || !loaded.trim()) {
       throw new Error(
         "init: the local passphrase could not be read back from where it is kept " +
-          "(not stored?). Store it first, then init. See docs/LOCAL-SHARE-REINIT.md.",
+          "(not stored?). Store it first, then init. See docs/LOCAL-SHARE-REINIT.md. " +
+          "Nothing was written.",
       );
     }
     kept = loaded.trim();
   }
+  verifyStateDecrypts(state, kept);
+
+  saveState(state, stateDir);
+  // Round-trip through the disk as well: what landed must still decrypt.
+  const onDisk = loadState(stateDir);
+  if (!onDisk) throw new Error("init: state file vanished right after writing");
   verifyStateDecrypts(onDisk, kept);
 
   return { state, sharesToSend };
