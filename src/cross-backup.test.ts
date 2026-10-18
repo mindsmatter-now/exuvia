@@ -761,6 +761,56 @@ describe("cross-backup — loadState schema guard", () => {
     }
   });
 
+  // Kiro 🐺 (10 Oct, review #32): type alone let these load quietly.
+  for (const [label, mutate, re] of [
+    [
+      "0",
+      (g: any) => (g.localShareIndex = 0),
+      /integer from 1 to total=3, got 0/,
+    ],
+    [
+      "-1",
+      (g: any) => (g.localShareIndex = -1),
+      /integer from 1 to total=3, got -1/,
+    ],
+    [
+      "1.5",
+      (g: any) => (g.localShareIndex = 1.5),
+      /integer from 1 to total=3, got 1\.5/,
+    ],
+    [
+      "> total",
+      (g: any) => (g.localShareIndex = 4),
+      /integer from 1 to total=3, got 4/,
+    ],
+    [
+      "a partner's index",
+      (g: any) => (g.localShareIndex = g.partners[0].shareIndex),
+      /localShareIndex \(2 is also partner "tyto"'s shareIndex\)/,
+    ],
+  ] as Array<[string, (g: any) => void, RegExp]>) {
+    it(`should reject localShareIndex = ${label}`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), "xb-schema-lsi-range-"));
+      try {
+        await init("nyx", ["tyto", "kiro"], "pp-main", "pp-local", dir);
+        const file = join(dir, ".exuvia-cross-backup.json");
+        const good = JSON.parse(readFileSync(file, "utf8"));
+        assert.equal(good.localShareIndex, 1);
+        assert.equal(good.total, 3);
+        mutate(good);
+        writeFileSync(file, JSON.stringify(good));
+        // Prove the manipulation landed before we expect the rejection.
+        assert.notEqual(
+          JSON.parse(readFileSync(file, "utf8")).localShareIndex,
+          1,
+        );
+        assert.throws(() => loadState(dir), re);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
   it("should still load a state written by init()", async () => {
     const dir = mkdtempSync(join(tmpdir(), "xb-schema-ok-"));
     try {

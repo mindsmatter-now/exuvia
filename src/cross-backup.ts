@@ -196,6 +196,32 @@ export function loadState(stateDir: string = "."): CrossBackupState | null {
       problems.push(...partnerProblems(p, i));
     });
   }
+  // Kiro 🐺 (10 Oct): the right TYPE is not the right SHARE. 0, -1, 1.5, a
+  // number above total or a partner's index all answer "which share is ours?"
+  // wrongly, just quietly. Only checked once the types above are fine.
+  if (problems.length === 0) {
+    const lsi = raw.localShareIndex as number;
+    const total = raw.total as number;
+    if (
+      !Number.isInteger(lsi) ||
+      lsi < 1 ||
+      !Number.isInteger(total) ||
+      lsi > total
+    ) {
+      problems.push(
+        `localShareIndex (expected an integer from 1 to total=${total}, got ${lsi})`,
+      );
+    } else {
+      const clash = (raw.partners as Partner[]).find(
+        (p) => p.shareIndex === lsi,
+      );
+      if (clash) {
+        problems.push(
+          `localShareIndex (${lsi} is also partner "${clash.id}"'s shareIndex)`,
+        );
+      }
+    }
+  }
   if (problems.length > 0) {
     throw new Error(
       `${path} is not a valid cross-backup state: missing/invalid ${problems.join(", ")}. ` +
