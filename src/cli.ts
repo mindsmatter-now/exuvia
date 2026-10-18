@@ -884,7 +884,7 @@ async function crossBackupInitCmd(args: string[]): Promise<void> {
   if (!agentId || !partnersArg) {
     console.error("❌ --agent and --partners required");
     console.error(
-      "   Example: exuvia cross-backup init --agent nyx --partners tyto,kiro --passphrase <pp> --local-passphrase <lpp>",
+      "   Example: exuvia cross-backup init --agent nyx --partners tyto,kiro --passphrase <pp> --local-passphrase-file <file>",
     );
     process.exit(1);
   }
@@ -903,9 +903,28 @@ async function crossBackupInitCmd(args: string[]): Promise<void> {
     );
     process.exit(1);
   }
+  // Only a FILE can be read back after writing; a passphrase on the command
+  // line is checked against itself, so the May 2026 case ("never stored")
+  // would pass again (Tyto + Kiro, 18 Oct).
+  if (!lppFile && getArg(args, "--local-passphrase") !== undefined) {
+    console.error(
+      "❌ init needs --local-passphrase-file <file>, not --local-passphrase: it re-reads the stored file to verify it",
+    );
+    process.exit(1);
+  }
   if (lppFile && !existsSync(lppFile)) {
     console.error(
       `❌ Local passphrase file not found: ${lppFile} (store it first)`,
+    );
+    process.exit(1);
+  }
+  // Never replace an existing state by accident (Kiro, 18 Oct). rotate is the
+  // command for a new split; --force is for a deliberate re-init.
+  const existingState = join(stateDir, ".exuvia-cross-backup.json");
+  if (existsSync(existingState) && !hasFlag(args, "--force")) {
+    console.error(
+      `❌ ${existingState} already exists. Use \`cross-backup rotate\` for new shares, ` +
+        `or --force to replace it on purpose (the old shares stop working).`,
     );
     process.exit(1);
   }

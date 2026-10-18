@@ -17,6 +17,7 @@ import {
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
+import { createHash } from "crypto";
 import { init, receiveShare, hashShare, decryptShare } from "./cross-backup.js";
 
 // Built as CommonJS: __dirname is dist/ next to the compiled cli.js.
@@ -649,6 +650,16 @@ describe("cross-backup init: same local-passphrase guards as receive (Kiro, revi
     });
   }
 
+  it("--local-passphrase without a file -> exit 1, no state written (Tyto + Kiro, 18 Oct)", () => {
+    const r = runInit([...base(), "--local-passphrase", "init-key"]);
+    assert.equal(r.code, 1, r.out);
+    assert.match(
+      r.out,
+      /needs --local-passphrase-file <file>, not --local-passphrase/,
+    );
+    assert.ok(!existsSync(state()), "state written on abort");
+  });
+
   it("group/world-readable lpp file -> warning, init still works", () => {
     const r = runInit([
       ...base(),
@@ -658,6 +669,46 @@ describe("cross-backup init: same local-passphrase guards as receive (Kiro, revi
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /readable by group\/others/);
     assert.ok(existsSync(state()));
+  });
+});
+
+describe("cross-backup init over an existing state (Kiro, 18 Oct)", () => {
+  let dir: string;
+  const state = () => join(dir, ".exuvia-cross-backup.json");
+  const sha = () =>
+    createHash("sha256").update(readFileSync(state())).digest("hex");
+  const args = () => [
+    "--agent",
+    "nyx",
+    "--partners",
+    "tyto,kiro",
+    "--passphrase",
+    "init-pass",
+    "--state-dir",
+    dir,
+    "--local-passphrase-file",
+    join(dir, "lpp"),
+  ];
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-cli-reinit-"));
+    writeFileSync(join(dir, "lpp"), "init-key\n", { mode: 0o600 });
+  });
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("second init without --force -> exit 1, state byte-identical", () => {
+    assert.equal(runInit(args()).code, 0);
+    const before = sha();
+    const r = runInit(args());
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /already exists.*rotate.*--force/s);
+    assert.equal(sha(), before, "existing state was replaced");
+  });
+
+  it("second init with --force replaces it on purpose", () => {
+    const before = sha();
+    const r = runInit([...args(), "--force"]);
+    assert.equal(r.code, 0, r.out);
+    assert.notEqual(sha(), before, "--force must actually write a new state");
   });
 });
 
