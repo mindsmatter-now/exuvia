@@ -35,6 +35,7 @@ import {
   existsSync,
   mkdirSync,
   statSync,
+  readdirSync,
 } from "fs";
 import {
   ping as dmsPing,
@@ -227,6 +228,84 @@ function saveState(workspace: string, state: StateFile): void {
   );
 }
 
+/**
+ * saveState for commands: on failure one readable line instead of a Node
+ * stack trace, and it says when a file already on disk now has no state entry
+ * (Kiro, review #30: under ulimit the new .enc exists, the state does not
+ * know it). The old state is untouched (writePrivateAtomic, #29).
+ */
+function saveStateOrExit(
+  workspace: string,
+  state: StateFile,
+  orphan?: string,
+): void {
+  try {
+    saveState(workspace, state);
+  } catch (e: any) {
+    const why = e?.code || e?.message || String(e);
+    console.error(
+      `❌ State could not be saved: ${why}. The previous ${STATE_FILE} is unchanged.`,
+    );
+    if (orphan) {
+      console.error(
+        `   ${orphan} was already written but is not recorded in the state.`,
+      );
+    }
+    process.exit(1);
+  }
+}
+
+// State files written via writePrivateAtomic; a temp copy of one of them only
+// stays behind after kill -9 or a power cut (Kiro, review #29).
+const ATOMIC_STATE_FILES = [
+  STATE_FILE,
+  ".exuvia-cross-backup.json",
+  ".exuvia-received-shares.json",
+];
+const STALE_TMP_MS = 5 * 60 * 1000;
+
+/**
+ * Hints for `status`. Reading never changes anything: no chmod, no delete
+ * (Tyto + Kiro, 18 Oct).
+ */
+function stateHints(workspace: string, now = Date.now()): string[] {
+  const hints: string[] = [];
+  let names: string[] = [];
+  try {
+    names = readdirSync(workspace);
+  } catch {
+    return hints;
+  }
+  for (const name of names) {
+    const base = ATOMIC_STATE_FILES.find((f) => name.startsWith(`${f}.tmp-`));
+    if (!base) continue;
+    let age: number;
+    try {
+      age = now - statSync(join(workspace, name)).mtimeMs;
+    } catch {
+      continue;
+    }
+    if (age < STALE_TMP_MS) continue; // may be a save in progress
+    hints.push(
+      `⚠️  Leftover temp file ${name} (${Math.floor(age / 60000)} min old) from an interrupted save of ${base}. ` +
+        `It may contain encrypted shares; check it, then delete it yourself (shred -u).`,
+    );
+  }
+  for (const f of ATOMIC_STATE_FILES) {
+    try {
+      const mode = statSync(join(workspace, f)).mode & 0o777;
+      if (mode & 0o077) {
+        hints.push(
+          `ⓘ  ${f} is ${mode.toString(8).padStart(4, "0")} (readable by others); the next save sets it to 0600.`,
+        );
+      }
+    } catch {
+      /* file does not exist */
+    }
+  }
+  return hints;
+}
+
 // --- Commands ---
 
 async function backup(args: string[]) {
@@ -350,7 +429,7 @@ async function backup(args: string[]) {
     outputFile: outPath,
     files: fileHashes,
   };
-  saveState(workspace, state);
+  saveStateOrExit(workspace, state, outPath);
   log(`\n📋 State updated: ${STATE_FILE}`);
 }
 
@@ -550,6 +629,7 @@ async function status(args: string[]) {
   const state = loadState(workspace);
 
   log(`🦞 Exuvia v${VERSION}\n`);
+  for (const h of stateHints(workspace)) log(`   ${h}`);
 
   if (!state?.lastBackup) {
     log("   No backups found. Run `exuvia backup` first.");
@@ -701,7 +781,7 @@ async function arweaveUploadCmd(args: string[]) {
     log(`   📋 Linked to last backup in state file.`);
   }
 
-  saveState(workspace, state);
+  saveStateOrExit(workspace, state, `Arweave TX ${result.txId}`);
   log(`   📋 TX-ID persisted to ${STATE_FILE}`);
 
   // Print summary for copy-paste to ShellGames/Discord (Kiro K4: multiple locations)
