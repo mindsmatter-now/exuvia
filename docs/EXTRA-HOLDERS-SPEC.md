@@ -81,10 +81,10 @@ Either path: a missing fingerprint = rejected.
 - `saveState` atomic (tmp + rename), warn if the passphrase file is not 0600 (Tyto)
 - `--local-passphrase-cmd` so `init` can read straight from `pass` (Kiro)
 - ~~`localShareIndex` is missing from `REQUIRED_STATE_FIELDS`~~ → required
-  since PR #8 (4c63696). **Still open:** the guard only checks the *type*.
-  `0`, `-1`, `1.5` or a partner's index all load quietly, so "which share is
-  ours?" is answered wrong, just more quietly. Plausible: integer ≥ 1,
-  ≤ total, and no partner has the same index. (Kiro, ShellGames 10.10. 02:07Z)
+  since PR #8 (bb72863). ~~The guard only checks the *type*~~ → `loadState`
+  now also rejects `0`, `-1`, `1.5`, a value above `total` and a partner's
+  index: integer ≥ 1, ≤ total, no partner with the same index (PR #33).
+  (Kiro, ShellGames 10.10. 02:07Z; hash fix: Tyto + Kiro, review #32)
 - `rotate()` has no round-trip check: it calls `saveState` without
   `verifyStateDecrypts` first (Kiro, 07/08 Oct; checked 09 Oct)
 - `saveState` order, not only atomicity: **check first, THEN replace the old,
