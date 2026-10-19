@@ -18,7 +18,13 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
 import { createHash } from "crypto";
-import { init, receiveShare, hashShare, decryptShare } from "./cross-backup.js";
+import {
+  init,
+  receiveShare,
+  hashShare,
+  decryptShare,
+  STATE_FILE,
+} from "./cross-backup.js";
 
 // Built as CommonJS: __dirname is dist/ next to the compiled cli.js.
 const CLI = join(__dirname, "cli.js");
@@ -709,6 +715,29 @@ describe("cross-backup init over an existing state (Kiro, 18 Oct)", () => {
     const r = runInit([...args(), "--force"]);
     assert.equal(r.code, 0, r.out);
     assert.notEqual(sha(), before, "--force must actually write a new state");
+  });
+
+  it("--force keeps the old state as .bak-<time>, 0600, byte-identical (Kiro, review #34)", () => {
+    const oldBytes = readFileSync(state());
+    const r = runInit([...args(), "--force"]);
+    assert.equal(r.code, 0, r.out);
+    const baks = readdirSync(dir).filter((f) =>
+      f.startsWith(".exuvia-cross-backup.json.bak-"),
+    );
+    const match = baks.filter((f) =>
+      readFileSync(join(dir, f)).equals(oldBytes),
+    );
+    assert.equal(match.length, 1, `no .bak with the old bytes: ${baks}`);
+    assert.equal(statSync(join(dir, match[0])).mode & 0o777, 0o600);
+    assert.ok(!readFileSync(state()).equals(oldBytes), "state not replaced");
+  });
+
+  it("the CLI guards the same file the library writes (STATE_FILE, Kiro)", () => {
+    assert.equal(STATE_FILE, ".exuvia-cross-backup.json");
+    assert.ok(existsSync(join(dir, STATE_FILE)));
+    const r = runInit(args());
+    assert.equal(r.code, 1, r.out);
+    assert.ok(r.out.includes(join(dir, STATE_FILE)), r.out);
   });
 });
 
