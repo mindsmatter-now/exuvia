@@ -50,6 +50,7 @@ import {
   rotate as crossBackupRotate,
   recover as crossBackupRecover,
   writePrivateAtomic,
+  STATE_FILE as CROSS_BACKUP_STATE_FILE,
 } from "./cross-backup.js";
 import { join, dirname } from "path";
 import { createInterface } from "readline";
@@ -259,7 +260,7 @@ function saveStateOrExit(
 // stays behind after kill -9 or a power cut (Kiro, review #29).
 const ATOMIC_STATE_FILES = [
   STATE_FILE,
-  ".exuvia-cross-backup.json",
+  CROSS_BACKUP_STATE_FILE,
   ".exuvia-received-shares.json",
 ];
 const STALE_TMP_MS = 5 * 60 * 1000;
@@ -920,8 +921,9 @@ async function crossBackupInitCmd(args: string[]): Promise<void> {
   }
   // Never replace an existing state by accident (Kiro, 18 Oct). rotate is the
   // command for a new split; --force is for a deliberate re-init.
-  const existingState = join(stateDir, ".exuvia-cross-backup.json");
-  if (existsSync(existingState) && !hasFlag(args, "--force")) {
+  const existingState = join(stateDir, CROSS_BACKUP_STATE_FILE);
+  const force = hasFlag(args, "--force");
+  if (existsSync(existingState) && !force) {
     console.error(
       `❌ ${existingState} already exists. Use \`cross-backup rotate\` for new shares, ` +
         `or --force to replace it on purpose (the old shares stop working).`,
@@ -937,6 +939,15 @@ async function crossBackupInitCmd(args: string[]): Promise<void> {
   const loadKept: (() => string) | undefined = lppFile
     ? () => readFileSync(lppFile, "utf8")
     : undefined;
+
+  // --force keeps the old state recoverable (Kiro, review #34): a 0600 copy
+  // next to it, written before init touches anything.
+  if (force && existsSync(existingState)) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const bak = `${existingState}.bak-${stamp}`;
+    writePrivateAtomic(bak, readFileSync(existingState, "utf8"));
+    log(`🗄️  Old state kept as ${bak} (0600)`);
+  }
 
   log(`🔺 Cross-Backup Init — ${agentId}`);
   log(`   Partners: ${partnerIds.join(", ")}`);

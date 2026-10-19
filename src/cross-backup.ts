@@ -74,7 +74,8 @@ export interface InitResult {
 
 // ── Constants ──────────────────────────────────────────────────────
 
-const STATE_FILE = ".exuvia-cross-backup.json";
+/** File name of the cross-backup state inside stateDir (exported so the CLI never repeats it as text, Kiro). */
+export const STATE_FILE = ".exuvia-cross-backup.json";
 const CROSS_BACKUP_CIPHER = "aes-256-gcm";
 
 // scrypt params — matches crypto.ts (Tyto: scrypt from day 1, not SHA-256)
@@ -398,6 +399,10 @@ export function verifyStateDecrypts(
  *   wherever it is KEPT (pass, file, ...). If given, the round-trip check uses
  *   what this returns, not the in-memory argument. That is the only way to
  *   catch "the passphrase was never stored" — the May 2026 failure (Kiro 🐺).
+ *
+ * init() REPLACES an existing state in stateDir without asking. Callers must
+ * guard against that themselves (the CLI refuses unless --force, and keeps a
+ * .bak-<time> copy first) — Tyto, review #34.
  */
 export async function init(
   agentId: string,
