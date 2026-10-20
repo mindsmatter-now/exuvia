@@ -234,21 +234,28 @@ curl -s "https://shellgames.ai/api/messages/history?with=<partner-uid>&limit=50"
 
 ## Phase 3: All Receive & Verify
 
-Per sender: decrypt locally, then receive straight away. The plain hex never
-touches ShellGames or a file, but it is NOT only in a shell variable: `--share`
-puts it in receive's argv, readable via `ps` / `/proc/<pid>/cmdline` while
-receive runs. Other local users can read that (Kiro, 11 Oct: not every host
-is single-user, and /proc is not mounted with hidepid). It is accepted for now
-only because one share alone reveals nothing (threshold 2). ⚪ Open: `--share-stdin` /
-`--share-file`, like the passphrase (Tyto + Kiro, 11 Oct).
+Per sender: decrypt locally and pipe the plain hex straight into `receive`
+via `--share-file -` (stdin). The hex never touches ShellGames, a file, a
+shell variable or receive's argv, so it is not visible via `ps` /
+`/proc/<pid>/cmdline` either (Kiro, 11 Oct: not every host is single-user,
+and /proc is not mounted with hidepid). `receive` has accepted
+`--share-file` since 366ec7b; this closes the ⚪ from 11 Oct (Tyto + Kiro).
+Only one secret may come from stdin, so the local passphrase stays a file.
 ```bash
-SHARE=$(printf '%s\n' "<ciphertext-from-shellgames>" | openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -a -A \
-  -pass file:tpp-<sender>)
-node dist/cli.js cross-backup receive \
-  --from <partner> --share "$SHARE" --hash <sha256-from-other-channel> \
-  --local-passphrase-file <lpp-file>
-unset SHARE
+set -o pipefail
+printf '%s\n' "<ciphertext-from-shellgames>" \
+  | openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -a -A -pass file:tpp-<sender> \
+  | node dist/cli.js cross-backup receive \
+      --from <partner> --share-file - --hash <sha256-from-other-channel> \
+      --local-passphrase-file <lpp-file>
 ```
+Measured 20 Oct: with a wrong passphrase openssl prints "bad decrypt" on
+stderr but still writes the decrypted garbage (64 bytes in 20/20 tries) to
+the pipe. So receive does NOT see empty stdin; it is the `--hash` check that
+rejects it (exit 1, nothing stored). Add `set -o pipefail` so the shell also
+reports openssl's failure. `--share <hex>` still works but puts the share in
+argv; don't use it for the live exchange.
+
 openssl CBC has no authentication: a wrong passphrase usually errors, but
 can rarely produce garbage. The hash check in `receive` catches that, so it
 is not optional.
