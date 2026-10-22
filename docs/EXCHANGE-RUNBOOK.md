@@ -301,6 +301,10 @@ Kiro: 🐺 ✅ Triangle complete
   `rotate` overwrites the local share BEFORE the partners have the new ones.
   If distribution breaks off, you hold version N+1 and the partners hold N,
   and the two do not fit together (Tyto, 12 Oct).
+  ✅ The backup part is now automatic: `rotate` writes the old state (version
+  N) as `.exuvia-cross-backup.json.bak-<time>` (0600) before it changes
+  anything, like `init --force`; a refused rotate removes the copy again
+  (Nyx, 22 Oct). "Only when all three are live" stays a rule for us.
 - ✅ `rotate` checks that `--passphrase` is the real identity passphrase:
   it combines `threshold` of the OLD stored shares and refuses (exit 1, state
   untouched) if they reconstruct anything else, or if too few of them decrypt
