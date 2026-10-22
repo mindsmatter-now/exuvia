@@ -592,6 +592,48 @@ describe("cli — cross-backup rotate --local-passphrase-file", () => {
     }
     assert.ok(!r.out.includes("cli-key"), "local passphrase leaked to output");
   });
+
+  const baks = () =>
+    readdirSync(dir).filter((f) =>
+      f.startsWith(".exuvia-cross-backup.json.bak-"),
+    );
+
+  it("rotate keeps the old state (version N) as .bak-<time>, 0600, byte-identical (runbook ⚪ 12 Oct)", () => {
+    const oldBytes = readFileSync(statePath());
+    const before = new Set(baks());
+    const r = runRotate([
+      "--passphrase-file",
+      join(dir, "pp"),
+      "--local-passphrase-file",
+      join(dir, "lpp-ok"),
+      "--state-dir",
+      dir,
+    ]);
+    assert.equal(r.code, 0, r.out);
+    const fresh = baks().filter((f) => !before.has(f));
+    assert.equal(fresh.length, 1, `expected one new .bak, got ${fresh}`);
+    assert.ok(
+      readFileSync(join(dir, fresh[0])).equals(oldBytes),
+      ".bak is not the old state",
+    );
+    assert.equal(statSync(join(dir, fresh[0])).mode & 0o777, 0o600);
+    assert.ok(!readFileSync(statePath()).equals(oldBytes), "state not rotated");
+    assert.match(r.out, /kept as .*\.bak-/);
+  });
+
+  it("refused rotate (wrong local passphrase) leaves no .bak behind", () => {
+    const before = baks().length;
+    const r = runRotate([
+      "--passphrase-file",
+      join(dir, "pp"),
+      "--local-passphrase-file",
+      join(dir, "lpp-wrong"),
+      "--state-dir",
+      dir,
+    ]);
+    assert.equal(r.code, 1, r.out);
+    assert.equal(baks().length, before, "a refused rotate left a backup");
+  });
 });
 
 function runInit(args: string[]) {

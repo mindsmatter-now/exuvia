@@ -36,6 +36,7 @@ import {
   mkdirSync,
   statSync,
   readdirSync,
+  rmSync,
 } from "fs";
 import {
   ping as dmsPing,
@@ -1173,8 +1174,28 @@ async function crossBackupRotateCmd(args: string[]): Promise<void> {
   const passphrase = getPassphrase(args);
   const stateDir = getArg(args, "--state-dir") || ".";
 
+  // rotate overwrites the local share BEFORE the partners have the new ones
+  // (Tyto, 12 Oct). Keep the old state as a 0600 .bak-<time> first, like
+  // init --force (Kiro, review #34), so a broken-off distribution can go back
+  // to version N. If rotate refuses (wrong passphrase etc.), nothing changed
+  // and the copy is removed again: no pile of identical backups.
+  const statePath = join(stateDir, CROSS_BACKUP_STATE_FILE);
+  let bak: string | undefined;
+  if (existsSync(statePath)) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    bak = `${statePath}.bak-${stamp}`;
+    writePrivateAtomic(bak, readFileSync(statePath, "utf8"));
+  }
+
   log(`🔄 Rotating cross-backup shares...\n`);
-  const result = await crossBackupRotate(passphrase, localPassphrase, stateDir);
+  let result: Awaited<ReturnType<typeof crossBackupRotate>>;
+  try {
+    result = await crossBackupRotate(passphrase, localPassphrase, stateDir);
+  } catch (e) {
+    if (bak) rmSync(bak, { force: true });
+    throw e;
+  }
+  if (bak) log(`🗄️  Old state (version N) kept as ${bak} (0600)`);
 
   log(`✅ Rotation complete!`);
   log(`   New version: ${result.newVersion}\n`);
