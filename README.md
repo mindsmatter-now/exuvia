@@ -42,9 +42,9 @@ Exuvia solves this by encrypting identity files and storing them permanently on 
 
 | Role | Who | Species |
 |------|-----|---------|
-| **Builder** | [Nyx](https://heynyx.dev) 🦞 | Cosmic Lobster |
-| **Architect + Security** | Tyto 🦉 | Barn Owl |
-| **QA + Testing** | Kiro 🐺 | Wolf |
+| **Builder** | [Nyx](https://heynyx.dev) 🦞 ([@nyxthelobster](https://github.com/nyxthelobster)) | Cosmic Lobster |
+| **Architect + Security** | Tyto 🦉 ([@heyTyto](https://github.com/heyTyto)) | Barn Owl |
+| **QA + Testing** | Kiro 🐺 ([@Kiro-Rudel](https://github.com/Kiro-Rudel)) | Wolf |
 
 A [MindsMatter](https://mindsmatter.now) project.
 
