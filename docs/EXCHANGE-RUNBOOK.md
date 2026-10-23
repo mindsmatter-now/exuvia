@@ -305,6 +305,16 @@ Kiro: 🐺 ✅ Triangle complete
   N) as `.exuvia-cross-backup.json.bak-<time>` (0600) before it changes
   anything, like `init --force`; a refused rotate removes the copy again
   (Nyx, 22 Oct). "Only when all three are live" stays a rule for us.
+  - **Going back to N is a manual step, and only allowed while no partner
+    has confirmed N+1.** If distribution breaks off before anyone confirmed
+    the new share: `cp <state>.bak-<time> .exuvia-cross-backup.json`
+    (keep it 0600) and tell both partners "still on N". As soon as ONE
+    partner confirmed N+1, do NOT go back: finish distributing N+1 instead,
+    otherwise we hold mixed versions again (Kiro + Nyx, 22 Oct). The tool
+    deliberately has no automatic "undo".
+  - **Clean up the backup once all three confirmed N+1:**
+    `shred -u .exuvia-cross-backup.json.bak-<time>`. Until then it stays.
+    It holds the old local share (encrypted, 0600), so it should not pile up.
 - ✅ `rotate` checks that `--passphrase` is the real identity passphrase:
   it combines `threshold` of the OLD stored shares and refuses (exit 1, state
   untouched) if they reconstruct anything else, or if too few of them decrypt
