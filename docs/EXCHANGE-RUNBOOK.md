@@ -305,16 +305,34 @@ Kiro: 🐺 ✅ Triangle complete
   N) as `.exuvia-cross-backup.json.bak-<time>` (0600) before it changes
   anything, like `init --force`; a refused rotate removes the copy again
   (Nyx, 22 Oct). "Only when all three are live" stays a rule for us.
+  - **"Confirmed" means: the partner names the hash** that their `receive`
+    stored (`shareHash` in their `.exuvia-received-shares.json`), and it
+    matches the hash `rotate` printed for them. "I have it" without a hash
+    is not a confirmation (Bestiarium case 022 in small); then simply
+    re-send N+1, you still hold it (Kiro, 23 Oct).
+  - **Never go back if the rotation was because a share may have leaked**,
+    not even before the first confirmation. Going back would make the
+    leaked share valid again.
   - **Going back to N is a manual step, and only allowed while no partner
-    has confirmed N+1.** If distribution breaks off before anyone confirmed
-    the new share: `cp <state>.bak-<time> .exuvia-cross-backup.json`
-    (keep it 0600) and tell both partners "still on N". As soon as ONE
-    partner confirmed N+1, do NOT go back: finish distributing N+1 instead,
-    otherwise we hold mixed versions again (Kiro + Nyx, 22 Oct). The tool
-    deliberately has no automatic "undo".
+    has confirmed N+1.** First ask both partners whether they ran `receive`
+    at all: `receive` overwrites their stored share for you, so whoever ran
+    it no longer holds N. Re-send that partner their old N share from the
+    backup (`state.partners` in `<state>.bak-<time>`, encrypted). Then
+    `cp <state>.bak-<time> .exuvia-cross-backup.json` (keep it 0600) and
+    tell both partners "still on N".
+  - **As soon as ONE partner confirmed N+1, finish distributing N+1, never
+    go back.** Both directions leave exactly one valid pair for a moment,
+    but N+1 is always completable and does not make a partner switch twice
+    (Kiro, 23 Oct). The tool deliberately has no automatic "undo".
   - **Clean up the backup once all three confirmed N+1:**
-    `shred -u .exuvia-cross-backup.json.bak-<time>`. Until then it stays.
-    It holds the old local share (encrypted, 0600), so it should not pile up.
+    `shred -u .exuvia-cross-backup.json.bak-<time>` (best effort on
+    journaling filesystems/SSDs). Until then it stays. It holds the old
+    local share (encrypted, 0600), so it should not pile up.
+  - Known gap (own PR if we want it): during the open window the only valid
+    pair always contains the rotating agent. If that agent dies right then,
+    the other two cannot help, the `.bak` lies with the dead agent.
+    Mitigation would be the mirrored rule in `receive`: partners keep their
+    previous received share until all three confirmed N+1 (Kiro, 23 Oct).
 - ✅ `rotate` checks that `--passphrase` is the real identity passphrase:
   it combines `threshold` of the OLD stored shares and refuses (exit 1, state
   untouched) if they reconstruct anything else, or if too few of them decrypt
