@@ -306,10 +306,11 @@ Kiro: 🐺 ✅ Triangle complete
   anything, like `init --force`; a refused rotate removes the copy again
   (Nyx, 22 Oct). "Only when all three are live" stays a rule for us.
   - **"Confirmed" means: the partner names the hash** that their `receive`
-    stored (`shareHash` in their `.exuvia-received-shares.json`), and it
-    matches the hash `rotate` printed for them. "I have it" without a hash
+    stored, read back from their own file
+    (`jq -r '.<sender>.shareHash' .exuvia-received-shares.json`), and it
+    matches the `Hash:` that `rotate` printed for them. "I have it" without a hash
     is not a confirmation (Bestiarium case 022 in small); then simply
-    re-send N+1, you still hold it (Kiro, 23 Oct).
+    re-send N+1, you still hold it (Kiro + Tyto, 23 Oct).
   - **Never go back if the rotation was because a share may have leaked**,
     not even before the first confirmation. Going back would make the
     leaked share valid again.
@@ -325,8 +326,9 @@ Kiro: 🐺 ✅ Triangle complete
     but N+1 is always completable and does not make a partner switch twice
     (Kiro, 23 Oct). The tool deliberately has no automatic "undo".
   - **Clean up the backup once all three confirmed N+1:**
-    `shred -u .exuvia-cross-backup.json.bak-<time>` (best effort on
-    journaling filesystems/SSDs). Until then it stays. It holds the old
+    `shred -u .exuvia-cross-backup.json.bak-*` for every `.bak-<time>`
+    this rotation left (refused or repeated runs can leave several; best
+    effort on journaling filesystems/SSDs). Until then they stay. It holds the old
     local share (encrypted, 0600), so it should not pile up.
   - Known gap (own PR if we want it): during the open window the only valid
     pair always contains the rotating agent. If that agent dies right then,
