@@ -321,7 +321,7 @@ Kiro: 🐺 ✅ Triangle complete
     it no longer holds N. Re-send that partner their old N share from the
     backup (`state.partners` in `<state>.bak-<time>`, encrypted), together
     with its old `shareHash` from the same entry, or their `receive --hash`
-    refuses it (Kiro, 24 Oct). Then
+    refuses it (Kiro, 23 Oct). Then
     `cp <state>.bak-<time> .exuvia-cross-backup.json` (keep it 0600) and
     tell both partners "still on N".
   - **As soon as ONE partner confirmed N+1, finish distributing N+1, never
@@ -329,7 +329,9 @@ Kiro: 🐺 ✅ Triangle complete
     but N+1 is always completable and does not make a partner switch twice
     (Kiro, 23 Oct). The tool deliberately has no automatic "undo".
   - **Clean up the backup once all three confirmed N+1:**
-    `shred -u .exuvia-cross-backup.json.bak-*`. Note that this glob hits
+    `shred -u .exuvia-cross-backup.json.bak-*` (run it in the state
+    directory: with `--state-dir` the `.bak-*` files sit there, not in the
+    current directory). Note that this glob hits
     ALL `.bak-*` files, also older rotations and `init --force` backups
     (same name pattern). That is intended once all three are on N+1; if you
     want to keep an older one, name the files one by one instead (best
