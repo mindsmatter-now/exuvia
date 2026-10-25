@@ -1,0 +1,29 @@
+{
+  "agentId": "nyx",
+  "partners": [
+    {
+      "id": "tyto",
+      "shareIndex": 2,
+      "shareHex": "de6b87cbb1419ba7a3cfe24b0927577ae45e4784546091d9b77f27cf60b8cb95e41bd2289ffefda6078b00e89ef62c69b745d5480cb81ab0b158531667377dc8385e5a8f1925616481f8dedc42f82875f3ebaabd3a481aca8808c05c9585f71c609b4176dd30b7723728",
+      "version": 2,
+      "shareHash": "384d9d5c73e6f3eee82444d41dfc3b6d014e49e9d2add6d1e013ca8f27f4dd84",
+      "createdAt": "2026-05-13T19:16:22.782Z"
+    },
+    {
+      "id": "kiro",
+      "shareIndex": 3,
+      "shareHex": "f1d05492ff884c305f6e8de8134505ce54e909dc224d5b20da7991fecfeeeb5f83f261f2ed5657cde9a2271b4cbd94c93146d9291e3f4ca6f28a6c631aca28b81d6588a9acfc3ced2bafc47d7d9d27b44009ea75c424be03a064618976448ee8df07f2a423eccce86323",
+      "version": 2,
+      "shareHash": "a6ca3115a10749f90bbe35fef0c570c958e8b58d7ba7594e41fe2e2ac9c64e8e",
+      "createdAt": "2026-05-13T19:16:22.782Z"
+    }
+  ],
+  "localShareIndex": 1,
+  "localShareHex": "d07503856fc1dac39f706de6688e2bd77ffed3b0f2077a9c82f2f64c208ea934ddf845cf97e4995dd8e5a87e67e5f790223a8a097bbc6d759bb700b56997624c0041904d19f0f4c843b47c88c4082cc39680920a119048ef07e299d62a90a6221238470ba6d36fd6f9c4",
+  "localShareHash": "5dd9da58e808ae773826ab0297a613a8f3d606955af8c5c51491a284cecfd45c",
+  "version": 2,
+  "threshold": 2,
+  "total": 3,
+  "createdAt": "2026-05-13T19:16:22.782Z",
+  "updatedAt": "2026-06-23T21:01:03.739Z"
+}

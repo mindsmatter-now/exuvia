@@ -321,9 +321,14 @@ Kiro: 🐺 ✅ Triangle complete
     it no longer holds N. Re-send that partner their old N share from the
     backup (`state.partners` in `<state>.bak-<time>`, encrypted), together
     with its old `shareHash` from the same entry, or their `receive --hash`
-    refuses it (Kiro, 23 Oct). Then
-    `cp <state>.bak-<time> .exuvia-cross-backup.json` (keep it 0600) and
-    tell both partners "still on N".
+    refuses it (Kiro, 23 Oct). Then, in the state directory (with
+    `--state-dir` that is the directory you passed, not the current one;
+    Kiro, 24 Oct):
+    `cp -p .exuvia-cross-backup.json.bak-<time> .exuvia-cross-backup.json`
+    and tell both partners "still on N". Use `-p`: a plain `cp` onto the
+    existing state file keeps the target's old mode, it does not take the
+    0600 of the backup (measured with coreutils cp, Nyx, 25 Oct). Check with
+    `stat -c %a .exuvia-cross-backup.json` → `600`.
   - **As soon as ONE partner confirmed N+1, finish distributing N+1, never
     go back.** Both directions leave exactly one valid pair for a moment,
     but N+1 is always completable and does not make a partner switch twice
