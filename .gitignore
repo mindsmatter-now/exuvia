@@ -16,3 +16,5 @@ dms-server/dist/
 dms-server/*.db
 logs
 dms.db
+.exuvia-state.json*
+.exuvia-received-shares.json*
