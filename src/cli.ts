@@ -1020,7 +1020,19 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
   );
 
   if (result.verified && result.stored) {
-    log(`✅ Share from ${fromId} verified and stored!`);
+    log(`✅ Share from ${fromId} verified and stored as v${result.version}!`);
+    if (result.replaced) {
+      // Rudel 26.10.2026 (Tyto): a replace is never quiet. The old share is
+      // gone after this line, so say exactly which one.
+      const r = result.replaced;
+      const same = r.shareHash === expectedHash;
+      console.error(
+        `⚠️  REPLACED the share you held for ${fromId}: v${r.version} (hash ${r.shareHash.slice(0, 16)}…${r.lastVerified ? `, last verified ${r.lastVerified}` : ""}) → v${result.version} (hash ${expectedHash.slice(0, 16)}…)${same ? " — same share content" : ""}`,
+      );
+      console.error(
+        `   The previous share is NOT kept. If this was unexpected, ask ${fromId} before anything else.`,
+      );
+    }
   } else if (!result.verified) {
     console.error(`❌ Share verification FAILED! Hash mismatch.`);
     console.error(`   Expected: ${expectedHash}`);
@@ -1129,7 +1141,7 @@ async function crossBackupStatusCmd(args: string[]): Promise<void> {
   }
   for (const r of s.receivedShares) {
     log(
-      `   ${r.fromId}: ${r.shareOk ? "✅" : "❌ does not decrypt/match"} v${r.version}${r.arweaveTxId ? " 🌐" : ""}`,
+      `   ${r.fromId}: ${r.shareOk ? "✅" : "❌ does not decrypt/match"} v${r.version} hash ${r.shareHash ? `${r.shareHash.slice(0, 16)}…` : "(none)"}${r.arweaveTxId ? " 🌐" : ""}`,
     );
   }
 

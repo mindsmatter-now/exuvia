@@ -518,7 +518,13 @@ export function receiveShare(
   localPassphrase: string,
   arweaveTxId?: string,
   stateDir: string = ".",
-): { verified: boolean; stored: boolean } {
+): {
+  verified: boolean;
+  stored: boolean;
+  /** What this call overwrote, if anything (Rudel 26.10.: replace must be loud). */
+  replaced?: { version: number; shareHash: string; lastVerified?: string };
+  version?: number;
+} {
   // Verify integrity (Kiro F1)
   const actualHash = hashShare(shareHex);
   if (actualHash !== expectedHash) {
@@ -533,6 +539,7 @@ export function receiveShare(
   }
 
   const now = new Date().toISOString();
+  const prev = received[fromId];
   received[fromId] = {
     id: fromId,
     shareIndex: 0, // unknown, we just store what we got
@@ -545,7 +552,18 @@ export function receiveShare(
   };
 
   writePrivateAtomic(receivedPath, JSON.stringify(received, null, 2));
-  return { verified: true, stored: true };
+  return {
+    verified: true,
+    stored: true,
+    version: received[fromId].version,
+    replaced: prev
+      ? {
+          version: prev.version,
+          shareHash: prev.shareHash,
+          lastVerified: prev.lastVerified,
+        }
+      : undefined,
+  };
 }
 
 /**
@@ -645,6 +663,7 @@ export interface CrossBackupStatus {
     fromId: string;
     shareOk: boolean;
     version: number;
+    shareHash: string;
     lastVerified?: string;
     arweaveTxId?: string;
   }>;
@@ -897,6 +916,7 @@ export function status(
       fromId: r.id,
       shareOk: partnerOk(r),
       version: r.version,
+      shareHash: r.shareHash,
       lastVerified: r.lastVerified,
       arweaveTxId: r.arweaveTxId,
     })),
