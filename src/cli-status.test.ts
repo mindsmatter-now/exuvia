@@ -896,3 +896,70 @@ describe("cross-backup recover --local-passphrase-file / --shares-file", () => {
     assert.match(r.out, /only one secret can come from stdin/);
   });
 });
+
+// Rudel 26.10.2026 (PR 1 of the `previous` plan): a receive that overwrites a
+// share we already hold must say so loudly, and status must show per partner
+// which version + hash we hold, so a silent swap is visible afterwards.
+describe("cross-backup receive — replace is loud, status shows version + hash", () => {
+  let dir: string;
+  const a = "kiro-share-round-a";
+  const b = "kiro-share-round-b";
+  const args = (hex: string) => [
+    "--from",
+    "kiro",
+    "--hash",
+    hashShare(hex),
+    "--local-passphrase-file",
+    join(dir, "lpp"),
+    "--state-dir",
+    dir,
+    "--share-file",
+    "-",
+  ];
+
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-cli-replace-"));
+    await init("nyx", ["tyto", "kiro"], "pass", "cli-key", dir);
+    writeFileSync(join(dir, "lpp"), "cli-key\n", { mode: 0o600 });
+  });
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("first receive: stored as v1, no REPLACED warning", () => {
+    const r = runReceive(args(a), a + "\n");
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /stored as v1!/);
+    assert.doesNotMatch(r.out, /REPLACED/);
+  });
+
+  it("second receive: warns REPLACED with old version + old hash and new hash", () => {
+    const r = runReceive(args(b), b + "\n");
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /stored as v2!/);
+    assert.match(r.out, /REPLACED the share you held for kiro: v1/);
+    assert.ok(r.out.includes(hashShare(a).slice(0, 16)), "old hash missing");
+    assert.ok(r.out.includes(hashShare(b).slice(0, 16)), "new hash missing");
+    assert.match(r.out, /previous share is NOT kept/);
+    assert.doesNotMatch(r.out, /same share content/);
+  });
+
+  it("same share again: still loud, but says it is the same content", () => {
+    const r = runReceive(args(b), b + "\n");
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /REPLACED the share you held for kiro: v2/);
+    assert.match(r.out, /same share content/);
+  });
+
+  it("status lists the held version and hash per partner", () => {
+    const r = runStatus([
+      "--local-passphrase-file",
+      join(dir, "lpp"),
+      "--state-dir",
+      dir,
+    ]);
+    assert.ok(
+      r.out.includes(`kiro: ✅ v3 hash ${hashShare(b).slice(0, 16)}…`),
+      r.out,
+    );
+  });
+});
