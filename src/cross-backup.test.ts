@@ -1159,3 +1159,53 @@ describe("cross-backup — saveState is atomic (issue #17)", () => {
     }
   });
 });
+
+// Rudel 26.10.2026 (Kiro's proposal, Tyto ✅): a round id, random, fresh on every
+// init (also --force), unchanged by rotate. Step 1: it exists in the state.
+describe("round id — init makes one, rotate keeps it", () => {
+  let dir: string;
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-roundid-"));
+  });
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("init writes a 32-hex round id to the state on disk", async () => {
+    const r = await init("nyx", ["tyto", "kiro"], "pass", "key", dir);
+    assert.match(r.state.roundId ?? "", /^[0-9a-f]{32}$/);
+    assert.equal(loadState(dir)?.roundId, r.state.roundId);
+  });
+
+  it("rotate keeps the round id (version goes up, round stays)", async () => {
+    const { rotate } = await import("./cross-backup.js");
+    const before_ = loadState(dir)?.roundId;
+    const rot = await rotate("pass", "key", dir);
+    assert.equal(rot.newVersion, 2);
+    assert.equal(loadState(dir)?.roundId, before_);
+  });
+
+  it("a second init (like --force) makes a NEW round id", async () => {
+    const before_ = loadState(dir)?.roundId;
+    const r = await init("nyx", ["tyto", "kiro"], "pass", "key", dir);
+    assert.notEqual(r.state.roundId, before_);
+  });
+
+  it("status shows the round id", () => {
+    assert.equal(status("key", dir)?.roundId, loadState(dir)?.roundId);
+  });
+
+  it("a state from before round ids still loads (roundId undefined)", () => {
+    const p = join(dir, ".exuvia-cross-backup.json");
+    const raw = JSON.parse(readFileSync(p, "utf8"));
+    delete raw.roundId;
+    writeFileSync(p, JSON.stringify(raw));
+    assert.equal(loadState(dir)?.roundId, undefined);
+  });
+
+  it("a malformed round id is rejected loudly", () => {
+    const p = join(dir, ".exuvia-cross-backup.json");
+    const raw = JSON.parse(readFileSync(p, "utf8"));
+    raw.roundId = "not-a-round";
+    writeFileSync(p, JSON.stringify(raw));
+    assert.throws(() => loadState(dir), /roundId/);
+  });
+});

@@ -62,6 +62,13 @@ export interface CrossBackupState {
   threshold: number;
   total: number;
   arweaveTxId?: string; // our encrypted blob on Arweave
+  /**
+   * Round id (Rudel, 26.10.2026, Kiro's proposal): random, made fresh by every
+   * init (also --force), kept unchanged by rotate. Senders pass it along with a
+   * share so a receiver can tell "same round, newer share" from "new round".
+   * Not derived from the secret. Optional: states from before round ids lack it.
+   */
+  roundId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -136,6 +143,18 @@ export function decryptShare(encryptedHex: string, passphrase: string): string {
   return decrypted.toString("utf8");
 }
 
+// ── Round Id (Rudel 26.10.2026) ─────────────────────────────────────
+
+/** A fresh round id: 16 random bytes as hex. Independent of every secret. */
+export function newRoundId(): string {
+  return randomBytes(16).toString("hex");
+}
+
+/** A round id as it may arrive from outside: 32 lowercase hex chars. */
+export function isRoundId(v: unknown): v is string {
+  return typeof v === "string" && /^[0-9a-f]{32}$/.test(v);
+}
+
 // ── Share Hash (Kiro F1: integrity verification) ───────────────────
 
 /**
@@ -196,6 +215,10 @@ export function loadState(stateDir: string = "."): CrossBackupState | null {
     raw.partners.forEach((p: unknown, i: number) => {
       problems.push(...partnerProblems(p, i));
     });
+  }
+  // Round id is optional (old states), but if it is there it must be one.
+  if (raw?.roundId !== undefined && !isRoundId(raw.roundId)) {
+    problems.push("roundId (expected 32 lowercase hex chars or absent)");
   }
   // Kiro 🐺 (10 Oct): the right TYPE is not the right SHARE. 0, -1, 1.5, a
   // number above total or a partner's index all answer "which share is ours?"
@@ -461,6 +484,7 @@ export async function init(
     version: 1,
     threshold,
     total,
+    roundId: newRoundId(),
     createdAt: now,
     updatedAt: now,
   };
@@ -641,6 +665,8 @@ export function verifyShare(shareHex: string, expectedHash: string): boolean {
 export interface CrossBackupStatus {
   agentId: string;
   version: number;
+  /** Our round id, or undefined for a state from before round ids. */
+  roundId?: string;
   threshold: number;
   total: number;
   localShareOk: boolean;
@@ -898,6 +924,7 @@ export function status(
   return {
     agentId: state.agentId,
     version: state.version,
+    roundId: state.roundId,
     threshold: state.threshold,
     total: state.total,
     localShareOk,
