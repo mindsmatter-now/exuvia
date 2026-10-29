@@ -50,6 +50,8 @@ export interface Partner {
   shareHash: string; // SHA-256 of plaintext share for verification (Kiro F1)
   createdAt: string; // ISO timestamp
   lastVerified?: string; // last successful hash verification
+  /** Round id the sender passed with this share (received shares only, optional). */
+  roundId?: string;
 }
 
 export interface CrossBackupState {
@@ -534,6 +536,8 @@ export async function init(
  * @param localPassphrase - Our passphrase to encrypt the share at rest
  * @param arweaveTxId - Partner's Arweave blob tx ID (optional)
  * @param stateDir - Directory with state file
+ * @param roundId - Sender's round id (optional, 32 lowercase hex). Stored with
+ *   the share so a later receive can tell "same round" from "new round".
  */
 export function receiveShare(
   fromId: string,
@@ -542,13 +546,24 @@ export function receiveShare(
   localPassphrase: string,
   arweaveTxId?: string,
   stateDir: string = ".",
+  roundId?: string,
 ): {
   verified: boolean;
   stored: boolean;
   /** What this call overwrote, if anything (Rudel 26.10.: replace must be loud). */
-  replaced?: { version: number; shareHash: string; lastVerified?: string };
+  replaced?: {
+    version: number;
+    shareHash: string;
+    lastVerified?: string;
+    roundId?: string;
+  };
   version?: number;
+  roundId?: string;
 } {
+  // A malformed round id is refused before anything is read or written.
+  if (roundId !== undefined && !isRoundId(roundId)) {
+    throw new Error("roundId must be 32 lowercase hex chars");
+  }
   // Verify integrity (Kiro F1)
   const actualHash = hashShare(shareHex);
   if (actualHash !== expectedHash) {
@@ -573,6 +588,7 @@ export function receiveShare(
     createdAt: received[fromId]?.createdAt ?? now,
     lastVerified: now,
     arweaveTxId,
+    ...(roundId !== undefined ? { roundId } : {}),
   };
 
   writePrivateAtomic(receivedPath, JSON.stringify(received, null, 2));
@@ -580,11 +596,13 @@ export function receiveShare(
     verified: true,
     stored: true,
     version: received[fromId].version,
+    roundId,
     replaced: prev
       ? {
           version: prev.version,
           shareHash: prev.shareHash,
           lastVerified: prev.lastVerified,
+          roundId: prev.roundId,
         }
       : undefined,
   };
@@ -692,6 +710,8 @@ export interface CrossBackupStatus {
     shareHash: string;
     lastVerified?: string;
     arweaveTxId?: string;
+    /** Round id the sender passed with the share, if any. */
+    roundId?: string;
   }>;
 }
 
@@ -946,6 +966,7 @@ export function status(
       shareHash: r.shareHash,
       lastVerified: r.lastVerified,
       arweaveTxId: r.arweaveTxId,
+      roundId: r.roundId,
     })),
   };
 }
