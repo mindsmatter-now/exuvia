@@ -1209,3 +1209,67 @@ describe("round id — init makes one, rotate keeps it", () => {
     assert.throws(() => loadState(dir), /roundId/);
   });
 });
+
+describe("round id — receive stores the sender's round id", () => {
+  let dir: string;
+  const R1 = "a".repeat(32);
+  const R2 = "b".repeat(32);
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-rid-recv-"));
+    // own state in the same dir, so status() has something to report on
+    await init("nyx", ["tyto", "kiro"], "pass", "k", dir);
+  });
+  after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = () =>
+    JSON.parse(readFileSync(join(dir, ".exuvia-received-shares.json"), "utf8"));
+
+  it("stores the round id with the share and returns it", () => {
+    const h = "1234abcd";
+    const r = receiveShare("tyto", h, hashShare(h), "k", undefined, dir, R1);
+    assert.equal(r.roundId, R1);
+    assert.equal(file().tyto.roundId, R1);
+  });
+
+  it("a replace reports the previous round id", () => {
+    const h = "5678ef01";
+    const r = receiveShare("tyto", h, hashShare(h), "k", undefined, dir, R2);
+    assert.equal(r.replaced?.roundId, R1);
+    assert.equal(file().tyto.roundId, R2);
+  });
+
+  it("without a round id nothing is stored (old senders still work)", () => {
+    const h = "9abc";
+    const r = receiveShare("kiro", h, hashShare(h), "k", undefined, dir);
+    assert.equal(r.roundId, undefined);
+    assert.equal("roundId" in file().kiro, false);
+  });
+
+  it("a malformed round id is refused before anything is written", () => {
+    const before_ = readFileSync(
+      join(dir, ".exuvia-received-shares.json"),
+      "utf8",
+    );
+    const h = "dead";
+    assert.throws(
+      () => receiveShare("nyx", h, hashShare(h), "k", undefined, dir, "ZZ"),
+      /roundId/,
+    );
+    assert.equal(
+      readFileSync(join(dir, ".exuvia-received-shares.json"), "utf8"),
+      before_,
+    );
+  });
+
+  it("status lists the round id per held share", () => {
+    const s = status("k", dir);
+    assert.ok(s, "status needs the own state from before()");
+    assert.equal(
+      s.receivedShares.find((x) => x.fromId === "tyto")?.roundId,
+      R2,
+    );
+    assert.equal(
+      s.receivedShares.find((x) => x.fromId === "kiro")?.roundId,
+      undefined,
+    );
+  });
+});
