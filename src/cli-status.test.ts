@@ -1006,7 +1006,10 @@ describe("cross-backup receive --round, init/rotate/status print the round id", 
       const r = runReceive(args(a, ["--round", bad]), a + "\n");
       assert.equal(r.code, 1, r.out);
       assert.match(r.out, /--round must be 32 lowercase hex/);
-      assert.ok(!existsSync(received()), "received file written on bad --round");
+      assert.ok(
+        !existsSync(received()),
+        "received file written on bad --round",
+      );
     });
   }
 
@@ -1026,7 +1029,10 @@ describe("cross-backup receive --round, init/rotate/status print the round id", 
   it("replace WITHOUT --round says the old round id is dropped (Tyto, review #48)", () => {
     const r = runReceive(args(b), b + "\n");
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, new RegExp(`Round: ${R1} → \\(none given\\) — old round id dropped`));
+    assert.match(
+      r.out,
+      new RegExp(`Round: ${R1} → \\(none given\\) — old round id dropped`),
+    );
     assert.equal(stored().roundId, undefined);
   });
 
@@ -1042,9 +1048,7 @@ describe("cross-backup receive --round, init/rotate/status print the round id", 
   });
 
   it("status prints our round and the held round prefix", () => {
-    const own = JSON.parse(
-      readFileSync(join(dir, STATE_FILE), "utf8"),
-    ).roundId;
+    const own = JSON.parse(readFileSync(join(dir, STATE_FILE), "utf8")).roundId;
     const r = runStatus([
       "--local-passphrase-file",
       join(dir, "lpp"),
@@ -1056,9 +1060,7 @@ describe("cross-backup receive --round, init/rotate/status print the round id", 
   });
 
   it("rotate prints the kept round id", () => {
-    const own = JSON.parse(
-      readFileSync(join(dir, STATE_FILE), "utf8"),
-    ).roundId;
+    const own = JSON.parse(readFileSync(join(dir, STATE_FILE), "utf8")).roundId;
     const r = runRotate([
       "--passphrase",
       "pass",

@@ -1002,7 +1002,9 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
   // anything written, with the same rule as the library (32 lowercase hex).
   const roundId = getArg(args, "--round");
   if (args.includes("--round") && !isRoundId(roundId)) {
-    console.error("❌ --round must be 32 lowercase hex chars (as printed by the sender's init/rotate)");
+    console.error(
+      "❌ --round must be 32 lowercase hex chars (as printed by the sender's init/rotate)",
+    );
     process.exit(1);
   }
 
