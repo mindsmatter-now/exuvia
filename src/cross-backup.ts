@@ -719,6 +719,8 @@ export interface CrossBackupStatus {
 
 export interface RotateResult {
   newVersion: number;
+  /** Round id after rotate (kept from before; undefined for an old state). */
+  roundId?: string;
   sharesToSend: Map<string, { hex: string; hash: string }>;
 }
 
@@ -823,7 +825,7 @@ export async function rotate(
 
   saveState(state, stateDir);
 
-  return { newVersion: state.version, sharesToSend };
+  return { newVersion: state.version, roundId: state.roundId, sharesToSend };
 }
 
 // ── Recover ────────────────────────────────────────────────────────
