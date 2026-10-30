@@ -963,3 +963,111 @@ describe("cross-backup receive — replace is loud, status shows version + hash"
     );
   });
 });
+
+describe("cross-backup receive --round, init/rotate/status print the round id", () => {
+  let dir: string;
+  const a = "kiro-share-round-cli-a";
+  const b = "kiro-share-round-cli-b";
+  const R1 = "0123456789abcdef0123456789abcdef";
+  const R2 = "fedcba9876543210fedcba9876543210";
+  const args = (hex: string, extra: string[] = []) => [
+    "--from",
+    "kiro",
+    "--hash",
+    hashShare(hex),
+    "--local-passphrase-file",
+    join(dir, "lpp"),
+    "--state-dir",
+    dir,
+    "--share-file",
+    "-",
+    ...extra,
+  ];
+  const received = () => join(dir, ".exuvia-received-shares.json");
+  const stored = () =>
+    existsSync(received())
+      ? JSON.parse(readFileSync(received(), "utf8")).kiro
+      : undefined;
+
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-cli-round-"));
+    await init("nyx", ["tyto", "kiro"], "pass", "cli-key", dir);
+    writeFileSync(join(dir, "lpp"), "cli-key\n", { mode: 0o600 });
+  });
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  for (const [label, bad] of [
+    ["uppercase, right length (Kiro, review #48)", "A".repeat(32)],
+    ["too short", "abc"],
+    ["non-hex", "z".repeat(32)],
+  ] as const) {
+    it(`--round ${label} -> exit 1, nothing written`, () => {
+      const r = runReceive(args(a, ["--round", bad]), a + "\n");
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, /--round must be 32 lowercase hex/);
+      assert.ok(!existsSync(received()), "received file written on bad --round");
+    });
+  }
+
+  it("--round without a value -> exit 1, nothing written", () => {
+    const r = runReceive(args(a, ["--round"]), a + "\n");
+    assert.equal(r.code, 1, r.out);
+    assert.ok(!existsSync(received()));
+  });
+
+  it("valid --round is stored and printed", () => {
+    const r = runReceive(args(a, ["--round", R1]), a + "\n");
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, new RegExp(`Round: ${R1}`));
+    assert.equal(stored().roundId, R1);
+  });
+
+  it("replace WITHOUT --round says the old round id is dropped (Tyto, review #48)", () => {
+    const r = runReceive(args(b), b + "\n");
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, new RegExp(`Round: ${R1} → \\(none given\\) — old round id dropped`));
+    assert.equal(stored().roundId, undefined);
+  });
+
+  it("replace with a new round shows old → new", () => {
+    const r = runReceive(args(a, ["--round", R2]), a + "\n");
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, new RegExp(`Round: \\(none\\) → ${R2}`));
+  });
+
+  it("same round again says same round", () => {
+    const r = runReceive(args(a, ["--round", R2]), a + "\n");
+    assert.match(r.out, new RegExp(`Round: ${R2} → ${R2} — same round`));
+  });
+
+  it("status prints our round and the held round prefix", () => {
+    const own = JSON.parse(
+      readFileSync(join(dir, STATE_FILE), "utf8"),
+    ).roundId;
+    const r = runStatus([
+      "--local-passphrase-file",
+      join(dir, "lpp"),
+      "--state-dir",
+      dir,
+    ]);
+    assert.ok(r.out.includes(`Round: ${own}`), r.out);
+    assert.ok(r.out.includes(`round ${R2.slice(0, 8)}…`), r.out);
+  });
+
+  it("rotate prints the kept round id", () => {
+    const own = JSON.parse(
+      readFileSync(join(dir, STATE_FILE), "utf8"),
+    ).roundId;
+    const r = runRotate([
+      "--passphrase",
+      "pass",
+      "--local-passphrase-file",
+      join(dir, "lpp"),
+      "--state-dir",
+      dir,
+    ]);
+    assert.equal(r.code, 0, r.out);
+    assert.ok(r.out.includes(`Round: ${own} (unchanged by rotate)`), r.out);
+  });
+});

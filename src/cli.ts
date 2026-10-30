@@ -51,6 +51,7 @@ import {
   rotate as crossBackupRotate,
   recover as crossBackupRecover,
   writePrivateAtomic,
+  isRoundId,
   STATE_FILE as CROSS_BACKUP_STATE_FILE,
 } from "./cross-backup.js";
 import { join, dirname } from "path";
@@ -99,7 +100,7 @@ Usage:
     (--local-passphrase <lpp> still works, but only the file variant proves the passphrase is kept)
     Initialize cross-backup: split passphrase into Shamir shares.
 
-  exuvia cross-backup receive --from <id> --share-file <file|-> --hash <sha256> --local-passphrase-file <file|->   (or --share <hex> / --local-passphrase <lpp>; "-" = stdin, at most one per call; delete share files afterwards: shred -u)
+  exuvia cross-backup receive --from <id> --share-file <file|-> --hash <sha256> --local-passphrase-file <file|-> [--round <id>]   (or --share <hex> / --local-passphrase <lpp>; "-" = stdin, at most one per call; delete share files afterwards: shred -u)
     Receive and store a partner's share.
 
   exuvia cross-backup status --local-passphrase-file <file|->   (or --local-passphrase <lpp>; "-" = stdin)
@@ -966,7 +967,8 @@ async function crossBackupInitCmd(args: string[]): Promise<void> {
   log(`✅ Init complete!`);
   log(`   Version: ${result.state.version}`);
   log(`   Threshold: ${result.state.threshold}-of-${result.state.total}`);
-  log(`   Local share index: ${result.state.localShareIndex}\n`);
+  log(`   Local share index: ${result.state.localShareIndex}`);
+  log(`   Round: ${result.state.roundId ?? "(none)"}\n`);
 
   log(`📤 Shares to distribute:`);
   for (const [partnerId, share] of result.sharesToSend) {
@@ -996,6 +998,13 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
   const expectedHash = getArg(args, "--hash");
   const arweaveTxId = getArg(args, "--arweave-tx");
   const stateDir = getArg(args, "--state-dir") || ".";
+  // Optional sender round id. Checked here, before any secret is read or
+  // anything written, with the same rule as the library (32 lowercase hex).
+  const roundId = getArg(args, "--round");
+  if (args.includes("--round") && !isRoundId(roundId)) {
+    console.error("❌ --round must be 32 lowercase hex chars (as printed by the sender's init/rotate)");
+    process.exit(1);
+  }
 
   if (!fromId || !expectedHash) {
     console.error("❌ --from, --share-file (or --share) and --hash required");
@@ -1017,10 +1026,12 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
     localPassphrase,
     arweaveTxId,
     stateDir,
+    roundId,
   );
 
   if (result.verified && result.stored) {
     log(`✅ Share from ${fromId} verified and stored as v${result.version}!`);
+    log(`   Round: ${result.roundId ?? "(none given)"}`);
     if (result.replaced) {
       // Rudel 26.10.2026 (Tyto): a replace is never quiet. The old share is
       // gone after this line, so say exactly which one.
@@ -1029,6 +1040,15 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
       console.error(
         `⚠️  REPLACED the share you held for ${fromId}: v${r.version} (hash ${r.shareHash.slice(0, 16)}…${r.lastVerified ? `, last verified ${r.lastVerified}` : ""}) → v${result.version} (hash ${expectedHash.slice(0, 16)}…)${same ? " — same share content" : ""}`,
       );
+      // Tyto (review #48): a replace without a round id must not quietly
+      // drop the old one, so say which round is gone and that none came.
+      if (r.roundId || result.roundId) {
+        const oldR = r.roundId ?? "(none)";
+        const newR = result.roundId ?? "(none given)";
+        console.error(
+          `   Round: ${oldR} → ${newR}${r.roundId && r.roundId === result.roundId ? " — same round" : r.roundId && !result.roundId ? " — old round id dropped, new share has none" : ""}`,
+        );
+      }
       console.error(
         `   The previous share is NOT kept. If this was unexpected, ask ${fromId} before anything else.`,
       );
@@ -1122,6 +1142,7 @@ async function crossBackupStatusCmd(args: string[]): Promise<void> {
 
   log(`🔺 Cross-Backup Status — ${s.agentId}`);
   log(`   Version: ${s.version}`);
+  log(`   Round: ${s.roundId ?? "(none)"}`);
   log(`   Threshold: ${s.threshold}-of-${s.total}`);
   log(`   Local share: ${s.localShareOk ? "✅ OK" : "❌ FAILED"}\n`);
 
@@ -1141,7 +1162,7 @@ async function crossBackupStatusCmd(args: string[]): Promise<void> {
   }
   for (const r of s.receivedShares) {
     log(
-      `   ${r.fromId}: ${r.shareOk ? "✅" : "❌ does not decrypt/match"} v${r.version} hash ${r.shareHash ? `${r.shareHash.slice(0, 16)}…` : "(none)"}${r.arweaveTxId ? " 🌐" : ""}`,
+      `   ${r.fromId}: ${r.shareOk ? "✅" : "❌ does not decrypt/match"} v${r.version} hash ${r.shareHash ? `${r.shareHash.slice(0, 16)}…` : "(none)"}${r.roundId ? ` round ${r.roundId.slice(0, 8)}…` : ""}${r.arweaveTxId ? " 🌐" : ""}`,
     );
   }
 
@@ -1210,7 +1231,8 @@ async function crossBackupRotateCmd(args: string[]): Promise<void> {
   if (bak) log(`🗄️  Old state (version N) kept as ${bak} (0600)`);
 
   log(`✅ Rotation complete!`);
-  log(`   New version: ${result.newVersion}\n`);
+  log(`   New version: ${result.newVersion}`);
+  log(`   Round: ${result.roundId ?? "(none)"} (unchanged by rotate)\n`);
 
   log(`📤 New shares to distribute:`);
   for (const [partnerId, share] of result.sharesToSend) {
