@@ -52,6 +52,21 @@ export interface Partner {
   lastVerified?: string; // last successful hash verification
   /** Round id the sender passed with this share (received shares only, optional). */
   roundId?: string;
+  /**
+   * The share this one replaced, kept only when the receive asked for it
+   * (`keepPrevious`, default off, Rudel 26.10.2026). Exactly one level: the
+   * previous of a previous is dropped. Still encrypted with the local passphrase.
+   */
+  previous?: PreviousShare;
+}
+
+export interface PreviousShare {
+  shareHex: string; // encrypted, exactly as it was stored
+  version: number;
+  shareHash: string;
+  lastVerified?: string;
+  roundId?: string;
+  replacedAt: string; // ISO timestamp of the receive that replaced it
 }
 
 export interface CrossBackupState {
@@ -547,6 +562,7 @@ export function receiveShare(
   arweaveTxId?: string,
   stateDir: string = ".",
   roundId?: string,
+  opts: { keepPrevious?: boolean } = {},
 ): {
   verified: boolean;
   stored: boolean;
@@ -559,6 +575,8 @@ export function receiveShare(
   };
   version?: number;
   roundId?: string;
+  /** True when the replaced share was kept as `previous` (opt-in only). */
+  keptPrevious?: boolean;
 } {
   // A malformed round id is refused before anything is read or written.
   if (roundId !== undefined && !isRoundId(roundId)) {
@@ -590,6 +608,20 @@ export function receiveShare(
     arweaveTxId,
     ...(roundId !== undefined ? { roundId } : {}),
   };
+  // Keep the replaced share only on request, and only one level deep. Without
+  // the flag any older `previous` goes too: a replace without keep means the
+  // old secret is meant to be gone (compromised passphrase, Rudel 26.10.).
+  const keptPrevious = opts.keepPrevious === true && prev !== undefined;
+  if (keptPrevious) {
+    received[fromId].previous = {
+      shareHex: prev.shareHex,
+      version: prev.version,
+      shareHash: prev.shareHash,
+      lastVerified: prev.lastVerified,
+      ...(prev.roundId !== undefined ? { roundId: prev.roundId } : {}),
+      replacedAt: now,
+    };
+  }
 
   writePrivateAtomic(receivedPath, JSON.stringify(received, null, 2));
   return {
@@ -597,6 +629,7 @@ export function receiveShare(
     stored: true,
     version: received[fromId].version,
     roundId,
+    keptPrevious,
     replaced: prev
       ? {
           version: prev.version,
@@ -712,6 +745,13 @@ export interface CrossBackupStatus {
     arweaveTxId?: string;
     /** Round id the sender passed with the share, if any. */
     roundId?: string;
+    /** A kept previous share, if any (metadata only, never the share). */
+    previous?: {
+      version: number;
+      shareHash: string;
+      roundId?: string;
+      replacedAt: string;
+    };
   }>;
 }
 
@@ -969,6 +1009,16 @@ export function status(
       lastVerified: r.lastVerified,
       arweaveTxId: r.arweaveTxId,
       roundId: r.roundId,
+      ...(r.previous
+        ? {
+            previous: {
+              version: r.previous.version,
+              shareHash: r.previous.shareHash,
+              roundId: r.previous.roundId,
+              replacedAt: r.previous.replacedAt,
+            },
+          }
+        : {}),
     })),
   };
 }
