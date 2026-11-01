@@ -1008,6 +1008,17 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
     process.exit(1);
   }
 
+  // Rudel 31.10.2026 (Kiro): a previous is only kept within the same round,
+  // so --keep-previous without --round can never be right. Refuse before any
+  // secret is read. The library checks the old share's round as well.
+  const keepPrevious = args.includes("--keep-previous");
+  if (keepPrevious && !roundId) {
+    console.error(
+      "❌ --keep-previous needs --round <id> (previous is only kept within the same round)",
+    );
+    process.exit(1);
+  }
+
   if (!fromId || !expectedHash) {
     console.error("❌ --from, --share-file (or --share) and --hash required");
     process.exit(1);
@@ -1021,18 +1032,25 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
   const localPassphrase = resolveLocalPassphrase(args);
 
   log(`📥 Receiving share from ${fromId}...`);
-  const result = receiveShare(
-    fromId,
-    shareHex,
-    expectedHash,
-    localPassphrase,
-    arweaveTxId,
-    stateDir,
-    roundId,
-    // Opt-in only (Rudel 26.10.2026): without the flag a replace drops the
-    // old share, so a compromised one is really gone.
-    { keepPrevious: args.includes("--keep-previous") },
-  );
+  let result: ReturnType<typeof receiveShare>;
+  try {
+    result = receiveShare(
+      fromId,
+      shareHex,
+      expectedHash,
+      localPassphrase,
+      arweaveTxId,
+      stateDir,
+      roundId,
+      // Opt-in only (Rudel 26.10.2026): without the flag a replace drops the
+      // old share, so a compromised one is really gone.
+      { keepPrevious },
+    );
+  } catch (e: any) {
+    // e.g. --keep-previous across rounds: refused, nothing written.
+    console.error(`❌ ${e?.message ?? e}`);
+    process.exit(1);
+  }
 
   if (result.verified && result.stored) {
     log(`✅ Share from ${fromId} verified and stored as v${result.version}!`);

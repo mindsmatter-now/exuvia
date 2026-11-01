@@ -1119,7 +1119,7 @@ describe("cross-backup receive --keep-previous (opt-in, one level) + status line
   });
 
   it("replace WITH --keep-previous keeps the old one and says so", () => {
-    const r = runReceive(args(b, ["--keep-previous"]), b + "\n");
+    const r = runReceive(args(b, ["--round", R1, "--keep-previous"]), b + "\n");
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /previous share v1 is KEPT as previous/);
     assert.doesNotMatch(r.out, /is NOT kept/);
@@ -1140,6 +1140,25 @@ describe("cross-backup receive --keep-previous (opt-in, one level) + status line
       !s.out.includes(stored().previous.shareHex),
       "encrypted share must never be printed",
     );
+  });
+
+  it("--keep-previous without --round is refused before anything is read", () => {
+    const before_ = readFileSync(received(), "utf8");
+    const r = runReceive(args(c, ["--keep-previous"]), c + "\n");
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /--keep-previous needs --round/);
+    assert.equal(readFileSync(received(), "utf8"), before_);
+  });
+
+  it("--keep-previous with another round is refused, nothing written", () => {
+    const before_ = readFileSync(received(), "utf8");
+    const r = runReceive(
+      args(c, ["--round", "f".repeat(32), "--keep-previous"]),
+      c + "\n",
+    );
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /same round/);
+    assert.equal(readFileSync(received(), "utf8"), before_);
   });
 
   it("replace WITHOUT the flag drops the kept previous too (default off)", () => {

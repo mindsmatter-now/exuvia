@@ -1280,7 +1280,6 @@ describe("keep previous — receive keeps the replaced share only on request", (
   let dir: string;
   const R1 = "c".repeat(32);
   const R2 = "d".repeat(32);
-  const R3 = "e".repeat(32);
   const h1 = "11aa";
   const h2 = "22bb";
   const h3 = "33cc";
@@ -1309,7 +1308,7 @@ describe("keep previous — receive keeps the replaced share only on request", (
 
   it("keepPrevious keeps the replaced share, still encrypted and intact", () => {
     const before_ = file().kiro;
-    const r = receiveShare("kiro", h2, hashShare(h2), "k", undefined, dir, R2, {
+    const r = receiveShare("kiro", h2, hashShare(h2), "k", undefined, dir, R1, {
       keepPrevious: true,
     });
     assert.equal(r.keptPrevious, true);
@@ -1324,12 +1323,12 @@ describe("keep previous — receive keeps the replaced share only on request", (
   });
 
   it("exactly one level: the previous of a previous is dropped", () => {
-    receiveShare("kiro", h3, hashShare(h3), "k", undefined, dir, R3, {
+    receiveShare("kiro", h3, hashShare(h3), "k", undefined, dir, R1, {
       keepPrevious: true,
     });
     const p = file().kiro.previous;
     assert.equal(decryptShare(p.shareHex, "k"), h2);
-    assert.equal(p.roundId, R2);
+    assert.equal(p.roundId, R1);
     assert.equal("previous" in p, false);
     assert.ok(!JSON.stringify(file().kiro).includes(file().tyto.shareHex));
   });
@@ -1341,14 +1340,14 @@ describe("keep previous — receive keeps the replaced share only on request", (
   });
 
   it("a failed hash check touches neither share nor previous", () => {
-    receiveShare("kiro", h2, hashShare(h2), "k", undefined, dir, R2, {
+    receiveShare("kiro", h2, hashShare(h2), "k", undefined, dir, R1, {
       keepPrevious: true,
     });
     const before_ = readFileSync(
       join(dir, ".exuvia-received-shares.json"),
       "utf8",
     );
-    const r = receiveShare("kiro", h3, hashShare(h1), "k", undefined, dir, R3, {
+    const r = receiveShare("kiro", h3, hashShare(h1), "k", undefined, dir, R1, {
       keepPrevious: true,
     });
     assert.equal(r.stored, false);
@@ -1366,5 +1365,86 @@ describe("keep previous — receive keeps the replaced share only on request", (
     assert.equal("shareHex" in (k.previous as object), false);
     const t = s!.receivedShares.find((x) => x.fromId === "tyto")!;
     assert.equal(t.previous, undefined);
+  });
+});
+
+// Rudel 31.10.2026 (Kiro, design 26./28.10.): previous is only kept within the
+// SAME round. rotate keeps the round id, init --force sets a new one, so a
+// different or missing id must be refused loudly, never kept and never quiet.
+describe("keep previous — same round only, checked in the library", () => {
+  let dir: string;
+  const R1 = "a1".repeat(16);
+  const R2 = "b2".repeat(16);
+  const h1 = "44dd";
+  const h2 = "55ee";
+  const path = () => join(dir, ".exuvia-received-shares.json");
+  const file = () => JSON.parse(readFileSync(path(), "utf8"));
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-prev-round-"));
+    await init("nyx", ["tyto", "kiro"], "pass", "k", dir);
+  });
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("same round + flag keeps the previous", () => {
+    receiveShare("tyto", h1, hashShare(h1), "k", undefined, dir, R1);
+    const r = receiveShare("tyto", h2, hashShare(h2), "k", undefined, dir, R1, {
+      keepPrevious: true,
+    });
+    assert.equal(r.keptPrevious, true);
+    assert.equal(decryptShare(file().tyto.previous.shareHex, "k"), h1);
+  });
+
+  it("other round + flag is refused, nothing written", () => {
+    const before_ = readFileSync(path(), "utf8");
+    assert.throws(
+      () =>
+        receiveShare("tyto", h1, hashShare(h1), "k", undefined, dir, R2, {
+          keepPrevious: true,
+        }),
+      /same round/,
+    );
+    assert.equal(readFileSync(path(), "utf8"), before_);
+  });
+
+  it("no round id + flag is refused, nothing written", () => {
+    const before_ = readFileSync(path(), "utf8");
+    assert.throws(
+      () =>
+        receiveShare(
+          "tyto",
+          h1,
+          hashShare(h1),
+          "k",
+          undefined,
+          dir,
+          undefined,
+          {
+            keepPrevious: true,
+          },
+        ),
+      /round id/,
+    );
+    assert.equal(readFileSync(path(), "utf8"), before_);
+  });
+
+  it("old share without round id + flag is refused, nothing written", () => {
+    receiveShare("kiro", h1, hashShare(h1), "k", undefined, dir);
+    const before_ = readFileSync(path(), "utf8");
+    assert.throws(
+      () =>
+        receiveShare("kiro", h2, hashShare(h2), "k", undefined, dir, R1, {
+          keepPrevious: true,
+        }),
+      /round id/,
+    );
+    assert.equal(readFileSync(path(), "utf8"), before_);
+  });
+
+  it("without the flag a new round replaces and drops previous", () => {
+    const r = receiveShare("tyto", h1, hashShare(h1), "k", undefined, dir, R2);
+    assert.equal(r.stored, true);
+    assert.equal(r.keptPrevious, false);
+    assert.equal("previous" in file().tyto, false);
+    assert.equal(decryptShare(file().tyto.shareHex, "k"), h1);
   });
 });

@@ -597,6 +597,23 @@ export function receiveShare(
 
   const now = new Date().toISOString();
   const prev = received[fromId];
+  // Rudel 31.10.2026 (Kiro, design 26./28.10.): a previous is only kept within
+  // the SAME round. rotate keeps the round id, init --force sets a new one, so
+  // a different or missing id means the old secret is meant to be gone. Refuse
+  // loudly instead of keeping it, and do it here so no caller can skip it.
+  // Checked before anything is written.
+  if (opts.keepPrevious === true && prev !== undefined) {
+    if (roundId === undefined || prev.roundId === undefined) {
+      throw new Error(
+        "keepPrevious needs a round id on both shares (same round only); refusing, nothing written",
+      );
+    }
+    if (prev.roundId !== roundId) {
+      throw new Error(
+        "keepPrevious only within the same round (rotate keeps the id, init --force sets a new one); refusing, nothing written",
+      );
+    }
+  }
   received[fromId] = {
     id: fromId,
     shareIndex: 0, // unknown, we just store what we got
@@ -608,7 +625,8 @@ export function receiveShare(
     arweaveTxId,
     ...(roundId !== undefined ? { roundId } : {}),
   };
-  // Keep the replaced share only on request, and only one level deep. Without
+  // Keep the replaced share only on request, same round only (checked above),
+  // and only one level deep. Without
   // the flag any older `previous` goes too: a replace without keep means the
   // old secret is meant to be gone (compromised passphrase, Rudel 26.10.).
   const keptPrevious = opts.keepPrevious === true && prev !== undefined;
