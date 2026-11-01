@@ -1073,3 +1073,80 @@ describe("cross-backup receive --round, init/rotate/status print the round id", 
     assert.ok(r.out.includes(`Round: ${own} (unchanged by rotate)`), r.out);
   });
 });
+
+describe("cross-backup receive --keep-previous (opt-in, one level) + status line", () => {
+  let dir: string;
+  const a = "kiro-share-keep-cli-a";
+  const b = "kiro-share-keep-cli-b";
+  const c = "kiro-share-keep-cli-c";
+  const R1 = "0123456789abcdef0123456789abcdef";
+  const args = (hex: string, extra: string[] = []) => [
+    "--from",
+    "kiro",
+    "--hash",
+    hashShare(hex),
+    "--local-passphrase-file",
+    join(dir, "lpp"),
+    "--state-dir",
+    dir,
+    "--share-file",
+    "-",
+    ...extra,
+  ];
+  const received = () => join(dir, ".exuvia-received-shares.json");
+  const stored = () => JSON.parse(readFileSync(received(), "utf8")).kiro;
+  const status = () =>
+    runStatus([
+      "--local-passphrase-file",
+      join(dir, "lpp"),
+      "--state-dir",
+      dir,
+    ]);
+
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-cli-keep-"));
+    await init("nyx", ["tyto", "kiro"], "pass", "cli-key", dir);
+    writeFileSync(join(dir, "lpp"), "cli-key\n", { mode: 0o600 });
+  });
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("first receive with --keep-previous keeps nothing (nothing to keep)", () => {
+    const r = runReceive(args(a, ["--round", R1, "--keep-previous"]), a + "\n");
+    assert.equal(r.code, 0, r.out);
+    assert.equal(stored().previous, undefined);
+    assert.doesNotMatch(status().out, /previous:/);
+  });
+
+  it("replace WITH --keep-previous keeps the old one and says so", () => {
+    const r = runReceive(args(b, ["--keep-previous"]), b + "\n");
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /previous share v1 is KEPT as previous/);
+    assert.doesNotMatch(r.out, /is NOT kept/);
+    assert.equal(stored().previous.shareHash, hashShare(a));
+    assert.equal(stored().previous.roundId, R1);
+  });
+
+  it("status shows previous as metadata only, never the share", () => {
+    const s = status();
+    assert.match(
+      s.out,
+      new RegExp(
+        `previous: v1 hash ${hashShare(a).slice(0, 16)}… round ${R1.slice(0, 8)}… \\(kept `,
+      ),
+    );
+    assert.ok(!s.out.includes(a), "share text must never be printed");
+    assert.ok(
+      !s.out.includes(stored().previous.shareHex),
+      "encrypted share must never be printed",
+    );
+  });
+
+  it("replace WITHOUT the flag drops the kept previous too (default off)", () => {
+    const r = runReceive(args(c), c + "\n");
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /The previous share is NOT kept/);
+    assert.equal(stored().previous, undefined);
+    assert.doesNotMatch(status().out, /previous:/);
+  });
+});
