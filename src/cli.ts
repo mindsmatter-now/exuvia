@@ -1074,7 +1074,7 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
       }
       if (result.keptPrevious) {
         console.error(
-          `   The previous share v${r.version} is KEPT as previous (one level, still encrypted). Drop it once the new one is confirmed.`,
+          `   The previous share v${r.version} is KEPT as previous (one level, still encrypted). The next receive without --keep-previous deletes it.`,
         );
       } else {
         console.error(

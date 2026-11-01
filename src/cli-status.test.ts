@@ -1122,6 +1122,9 @@ describe("cross-backup receive --keep-previous (opt-in, one level) + status line
     const r = runReceive(args(b, ["--round", R1, "--keep-previous"]), b + "\n");
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /previous share v1 is KEPT as previous/);
+    // Tyto (review #51): no drop-previous yet, so say how it really goes away.
+    assert.match(r.out, /next receive without --keep-previous deletes it/);
+    assert.doesNotMatch(r.out, /Drop it once/);
     assert.doesNotMatch(r.out, /is NOT kept/);
     assert.equal(stored().previous.shareHash, hashShare(a));
     assert.equal(stored().previous.roundId, R1);
