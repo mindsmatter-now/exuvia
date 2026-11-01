@@ -100,7 +100,7 @@ Usage:
     (--local-passphrase <lpp> still works, but only the file variant proves the passphrase is kept)
     Initialize cross-backup: split passphrase into Shamir shares.
 
-  exuvia cross-backup receive --from <id> --share-file <file|-> --hash <sha256> --local-passphrase-file <file|-> [--round <id>]   (or --share <hex> / --local-passphrase <lpp>; "-" = stdin, at most one per call; delete share files afterwards: shred -u)
+  exuvia cross-backup receive --from <id> --share-file <file|-> --hash <sha256> --local-passphrase-file <file|-> [--round <id>] [--keep-previous]   (or --share <hex> / --local-passphrase <lpp>; "-" = stdin, at most one per call; delete share files afterwards: shred -u)
     Receive and store a partner's share.
 
   exuvia cross-backup status --local-passphrase-file <file|->   (or --local-passphrase <lpp>; "-" = stdin)
@@ -1008,6 +1008,17 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
     process.exit(1);
   }
 
+  // Rudel 31.10.2026 (Kiro): a previous is only kept within the same round,
+  // so --keep-previous without --round can never be right. Refuse before any
+  // secret is read. The library checks the old share's round as well.
+  const keepPrevious = args.includes("--keep-previous");
+  if (keepPrevious && !roundId) {
+    console.error(
+      "❌ --keep-previous needs --round <id> (previous is only kept within the same round)",
+    );
+    process.exit(1);
+  }
+
   if (!fromId || !expectedHash) {
     console.error("❌ --from, --share-file (or --share) and --hash required");
     process.exit(1);
@@ -1021,15 +1032,25 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
   const localPassphrase = resolveLocalPassphrase(args);
 
   log(`📥 Receiving share from ${fromId}...`);
-  const result = receiveShare(
-    fromId,
-    shareHex,
-    expectedHash,
-    localPassphrase,
-    arweaveTxId,
-    stateDir,
-    roundId,
-  );
+  let result: ReturnType<typeof receiveShare>;
+  try {
+    result = receiveShare(
+      fromId,
+      shareHex,
+      expectedHash,
+      localPassphrase,
+      arweaveTxId,
+      stateDir,
+      roundId,
+      // Opt-in only (Rudel 26.10.2026): without the flag a replace drops the
+      // old share, so a compromised one is really gone.
+      { keepPrevious },
+    );
+  } catch (e: any) {
+    // e.g. --keep-previous across rounds: refused, nothing written.
+    console.error(`❌ ${e?.message ?? e}`);
+    process.exit(1);
+  }
 
   if (result.verified && result.stored) {
     log(`✅ Share from ${fromId} verified and stored as v${result.version}!`);
@@ -1051,9 +1072,15 @@ async function crossBackupReceiveCmd(args: string[]): Promise<void> {
           `   Round: ${oldR} → ${newR}${r.roundId && r.roundId === result.roundId ? " — same round" : r.roundId && !result.roundId ? " — old round id dropped, new share has none" : ""}`,
         );
       }
-      console.error(
-        `   The previous share is NOT kept. If this was unexpected, ask ${fromId} before anything else.`,
-      );
+      if (result.keptPrevious) {
+        console.error(
+          `   The previous share v${r.version} is KEPT as previous (one level, still encrypted). The next receive without --keep-previous deletes it.`,
+        );
+      } else {
+        console.error(
+          `   The previous share is NOT kept. If this was unexpected, ask ${fromId} before anything else.`,
+        );
+      }
     }
   } else if (!result.verified) {
     console.error(`❌ Share verification FAILED! Hash mismatch.`);
@@ -1166,6 +1193,12 @@ async function crossBackupStatusCmd(args: string[]): Promise<void> {
     log(
       `   ${r.fromId}: ${r.shareOk ? "✅" : "❌ does not decrypt/match"} v${r.version} hash ${r.shareHash ? `${r.shareHash.slice(0, 16)}…` : "(none)"}${r.roundId ? ` round ${r.roundId.slice(0, 8)}…` : ""}${r.arweaveTxId ? " 🌐" : ""}`,
     );
+    // Metadata only, never the share itself.
+    if (r.previous) {
+      log(
+        `      previous: v${r.previous.version} hash ${r.previous.shareHash.slice(0, 16)}…${r.previous.roundId ? ` round ${r.previous.roundId.slice(0, 8)}…` : ""} (kept ${r.previous.replacedAt})`,
+      );
+    }
   }
 
   const receivedOk = s.receivedShares.every((r) => r.shareOk);
