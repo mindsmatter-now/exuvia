@@ -1381,7 +1381,18 @@ describe("keep previous — receive keeps the replaced share only on request", (
       assert.equal(k().previous?.previousOk, false);
       assert.equal(k().shareOk, true, "current share is not affected");
       f.kiro.previous.shareHash = JSON.parse(before_).kiro.previous.shareHash;
-      f.kiro.previous.shareHex = "00" + f.kiro.previous.shareHex.slice(2); // corrupt
+      // corrupt: FLIP the first byte. Setting it to "00" was a no-op whenever the
+      // random salt already started with 00 (1 in 256 runs: CI test (18), 02.11.).
+      const hex: string = f.kiro.previous.shareHex;
+      const flipped = (parseInt(hex.slice(0, 2), 16) ^ 0xff)
+        .toString(16)
+        .padStart(2, "0");
+      f.kiro.previous.shareHex = flipped + hex.slice(2);
+      assert.notEqual(
+        f.kiro.previous.shareHex,
+        hex,
+        "the corruption must land",
+      );
       writeFileSync(path, JSON.stringify(f));
       assert.equal(k().previous?.previousOk, false);
       assert.equal(
