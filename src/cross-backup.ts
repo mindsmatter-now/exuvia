@@ -769,6 +769,8 @@ export interface CrossBackupStatus {
       shareHash: string;
       roundId?: string;
       replacedAt: string;
+      /** Kept previous decrypts with our passphrase and matches its hash. */
+      previousOk: boolean;
     };
   }>;
 }
@@ -1034,6 +1036,10 @@ export function status(
               shareHash: r.previous.shareHash,
               roundId: r.previous.roundId,
               replacedAt: r.previous.replacedAt,
+              // Tyto 31.10.2026: shareOk only covered the current share. A
+              // previous that no longer decrypts would only show up on the
+              // day someone needs it. Same decrypt + hash rule, checked now.
+              previousOk: partnerOk(r.previous),
             },
           }
         : {}),

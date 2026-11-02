@@ -718,6 +718,22 @@ describe("cross-backup init: same local-passphrase guards as receive (Kiro, revi
     assert.match(r.out, /readable by group\/others/);
     assert.ok(existsSync(state()));
   });
+
+  // Tyto (review #49): init printed the round id, but no test held it.
+  it("init prints the round id it wrote into the state", () => {
+    const own = JSON.parse(readFileSync(state(), "utf8")).roundId;
+    assert.match(own, /^[0-9a-f]{32}$/);
+    const r = runInit([
+      ...base(),
+      "--force",
+      "--local-passphrase-file",
+      join(dir, "lpp"),
+    ]);
+    assert.equal(r.code, 0, r.out);
+    const fresh = JSON.parse(readFileSync(state(), "utf8")).roundId;
+    assert.notEqual(fresh, own, "init --force sets a new round");
+    assert.ok(r.out.includes(`Round: ${fresh}`), r.out);
+  });
 });
 
 describe("cross-backup init over an existing state (Kiro, 18 Oct)", () => {
@@ -1135,7 +1151,7 @@ describe("cross-backup receive --keep-previous (opt-in, one level) + status line
     assert.match(
       s.out,
       new RegExp(
-        `previous: v1 hash ${hashShare(a).slice(0, 16)}… round ${R1.slice(0, 8)}… \\(kept `,
+        `previous: ✅ v1 hash ${hashShare(a).slice(0, 16)}… round ${R1.slice(0, 8)}… \\(kept `,
       ),
     );
     assert.ok(!s.out.includes(a), "share text must never be printed");
@@ -1143,6 +1159,21 @@ describe("cross-backup receive --keep-previous (opt-in, one level) + status line
       !s.out.includes(stored().previous.shareHex),
       "encrypted share must never be printed",
     );
+  });
+
+  it("status marks a previous that no longer matches with ❌ (previousOk)", () => {
+    const before_ = readFileSync(received(), "utf8");
+    const f = JSON.parse(before_);
+    f.kiro.previous.shareHash = "0".repeat(64);
+    writeFileSync(received(), JSON.stringify(f));
+    try {
+      const s = status();
+      assert.match(s.out, /previous: ❌ does not decrypt\/match v1/);
+      assert.match(s.out, /kiro: ✅/, "current share line stays green");
+    } finally {
+      writeFileSync(received(), before_);
+    }
+    assert.match(status().out, /previous: ✅ v1/);
   });
 
   it("--keep-previous without --round is refused before anything is read", () => {

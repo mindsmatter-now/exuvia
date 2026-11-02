@@ -1366,6 +1366,45 @@ describe("keep previous — receive keeps the replaced share only on request", (
     const t = s!.receivedShares.find((x) => x.fromId === "tyto")!;
     assert.equal(t.previous, undefined);
   });
+
+  // Tyto 31.10.2026: shareOk only covered the current share.
+  it("previousOk: a kept previous is checked like any held share", () => {
+    const k = () =>
+      status("k", dir)!.receivedShares.find((x) => x.fromId === "kiro")!;
+    assert.equal(k().previous?.previousOk, true);
+    const path = join(dir, ".exuvia-received-shares.json");
+    const before_ = readFileSync(path, "utf8");
+    const f = JSON.parse(before_);
+    f.kiro.previous.shareHash = "0".repeat(64); // hash no longer matches
+    writeFileSync(path, JSON.stringify(f));
+    try {
+      assert.equal(k().previous?.previousOk, false);
+      assert.equal(k().shareOk, true, "current share is not affected");
+      f.kiro.previous.shareHash = JSON.parse(before_).kiro.previous.shareHash;
+      // corrupt: FLIP the first byte. Setting it to "00" was a no-op whenever the
+      // random salt already started with 00 (1 in 256 runs: CI test (18), 02.11.).
+      const hex: string = f.kiro.previous.shareHex;
+      const flipped = (parseInt(hex.slice(0, 2), 16) ^ 0xff)
+        .toString(16)
+        .padStart(2, "0");
+      f.kiro.previous.shareHex = flipped + hex.slice(2);
+      assert.notEqual(
+        f.kiro.previous.shareHex,
+        hex,
+        "the corruption must land",
+      );
+      writeFileSync(path, JSON.stringify(f));
+      assert.equal(k().previous?.previousOk, false);
+      assert.equal(
+        status("wrong", dir)!.receivedShares.find((x) => x.fromId === "kiro")!
+          .previous?.previousOk,
+        false,
+      );
+    } finally {
+      writeFileSync(path, before_);
+    }
+    assert.equal(k().previous?.previousOk, true);
+  });
 });
 
 // Rudel 31.10.2026 (Kiro, design 26./28.10.): previous is only kept within the
