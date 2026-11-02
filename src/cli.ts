@@ -1196,7 +1196,7 @@ async function crossBackupStatusCmd(args: string[]): Promise<void> {
     // Metadata only, never the share itself.
     if (r.previous) {
       log(
-        `      previous: v${r.previous.version} hash ${r.previous.shareHash.slice(0, 16)}…${r.previous.roundId ? ` round ${r.previous.roundId.slice(0, 8)}…` : ""} (kept ${r.previous.replacedAt})`,
+        `      previous: ${r.previous.previousOk ? "✅" : "❌ does not decrypt/match"} v${r.previous.version} hash ${r.previous.shareHash.slice(0, 16)}…${r.previous.roundId ? ` round ${r.previous.roundId.slice(0, 8)}…` : ""} (kept ${r.previous.replacedAt})`,
       );
     }
   }
