@@ -24,6 +24,8 @@ import {
   hashShare,
   decryptShare,
   STATE_FILE,
+  loadState,
+  rotate,
 } from "./cross-backup.js";
 
 // Built as CommonJS: __dirname is dist/ next to the compiled cli.js.
@@ -1201,5 +1203,108 @@ describe("cross-backup receive --keep-previous (opt-in, one level) + status line
     assert.match(r.out, /The previous share is NOT kept/);
     assert.equal(stored().previous, undefined);
     assert.doesNotMatch(status().out, /previous:/);
+  });
+});
+
+// Rudel 02.11.2026: recover --use-previous at the CLI. The flag really
+// reaches the library, stdout is still exactly the secret, and a refusal is
+// exit 1 with nothing on stdout.
+describe("cross-backup recover --use-previous", () => {
+  let dir: string;
+  let nyxDir: string;
+  const SECRET = "UsePrevCli!2026";
+
+  function run(dirArg: string, extra: string[]) {
+    const r = spawnSync(
+      process.execPath,
+      [
+        CLI,
+        "cross-backup",
+        "recover",
+        "--agent",
+        "nyx",
+        "--state-dir",
+        dirArg,
+        "--local-passphrase-file",
+        join(dirArg, "lpp"),
+        "--shares-file",
+        join(dirArg, "old-shares"),
+        ...extra,
+      ],
+      { encoding: "utf8", timeout: 30000 },
+    );
+    return { code: r.status, stdout: r.stdout, out: `${r.stdout}${r.stderr}` };
+  }
+
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-cli-useprev-"));
+    nyxDir = mkdtempSync(join(tmpdir(), "exuvia-cli-useprev-nyx-"));
+    const first = await init(
+      "nyx",
+      ["tyto", "kiro"],
+      SECRET,
+      "nyx-key",
+      nyxDir,
+    );
+    const round = loadState(nyxDir)!.roundId;
+    const t1 = first.sharesToSend.get("tyto")!;
+    receiveShare("nyx", t1.hex, t1.hash, "tyto-key", undefined, dir, round);
+    const second = await rotate(SECRET, "nyx-key", nyxDir);
+    const t2 = second.sharesToSend.get("tyto")!;
+    receiveShare("nyx", t2.hex, t2.hash, "tyto-key", undefined, dir, round, {
+      keepPrevious: true,
+    });
+    writeFileSync(join(dir, "lpp"), "tyto-key\n", { mode: 0o600 });
+    writeFileSync(
+      join(dir, "old-shares"),
+      first.sharesToSend.get("kiro")!.hex + "\n",
+      { mode: 0o600 },
+    );
+  });
+
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(nyxDir, { recursive: true, force: true });
+  });
+
+  it("--use-previous + old-round share -> exactly the secret on stdout", () => {
+    const r = run(dir, ["--use-previous"]);
+    assert.equal(r.code, 0, r.out);
+    assert.equal(r.stdout, SECRET, r.out);
+    assert.ok(r.out.includes("PREVIOUS"), r.out);
+  });
+
+  it("without the flag the same old-round share does not give the secret", () => {
+    const r = run(dir, []);
+    assert.notEqual(r.stdout, SECRET, "flag must matter: " + r.out);
+  });
+
+  it("no previous kept -> exit 1, nothing on stdout", () => {
+    const d = mkdtempSync(join(tmpdir(), "exuvia-cli-useprev-none-"));
+    try {
+      const recv = JSON.parse(
+        readFileSync(join(dir, ".exuvia-received-shares.json"), "utf8"),
+      );
+      delete recv.nyx.previous;
+      writeFileSync(
+        join(d, ".exuvia-received-shares.json"),
+        JSON.stringify(recv),
+        { mode: 0o600 },
+      );
+      writeFileSync(join(d, "lpp"), "tyto-key\n", { mode: 0o600 });
+      writeFileSync(
+        join(d, "old-shares"),
+        readFileSync(join(dir, "old-shares")),
+        {
+          mode: 0o600,
+        },
+      );
+      const r = run(d, ["--use-previous"]);
+      assert.equal(r.code, 1, r.out);
+      assert.equal(r.stdout, "", "a refusal must not print anything to stdout");
+      assert.ok(r.out.includes("No previous share kept"), r.out);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
   });
 });

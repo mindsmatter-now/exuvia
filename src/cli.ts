@@ -109,9 +109,11 @@ Usage:
   exuvia cross-backup rotate --passphrase <pp> --local-passphrase-file <file|->   (or --local-passphrase <lpp>; "-" = stdin)
     Rotate shares (re-split with new Shamir).
 
-  exuvia cross-backup recover --agent <id> --local-passphrase-file <file|-> --shares-file <file|->
+  exuvia cross-backup recover --agent <id> --local-passphrase-file <file|-> --shares-file <file|-> [--use-previous]
     (or --local-passphrase <lpp> / --shares <hex1,hex2>; "-" = stdin, at most one)
     Recover a downed agent's passphrase from shares. --shares-file: one hex per line.
+    --use-previous: use the kept previous share (see receive --keep-previous);
+    refuses if none was kept or it fails decrypt/hash (status: previous ❌).
 
   exuvia version
     Show version.
@@ -1305,7 +1307,10 @@ async function crossBackupRecoverCmd(args: string[]): Promise<void> {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  info(`🔺 Recovering ${agentId}...\n`);
+  const usePrevious = args.includes("--use-previous");
+  info(
+    `🔺 Recovering ${agentId}${usePrevious ? " from the PREVIOUS share" : ""}...\n`,
+  );
 
   try {
     const result = await crossBackupRecover(
@@ -1313,6 +1318,7 @@ async function crossBackupRecoverCmd(args: string[]): Promise<void> {
       localPassphrase,
       additionalShares,
       stateDir,
+      { usePrevious },
     );
     info(`✅ Recovery successful!`);
     info(`   Agent: ${result.agentId}`);

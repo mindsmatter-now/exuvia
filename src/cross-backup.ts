@@ -910,12 +910,15 @@ export interface RecoverResult {
  * @param localPassphrase - Our passphrase to decrypt our stored share
  * @param additionalShares - Plaintext shares from other partners
  * @param stateDir - Directory with received-shares state
+ * @param opts.usePrevious - Use the kept previous share instead of the current
+ *   one. Refuses (never falls back) if none was kept or it fails decrypt/hash.
  */
 export async function recover(
   agentId: string,
   localPassphrase: string,
   additionalShares: string[],
   stateDir: string = ".",
+  opts: { usePrevious?: boolean } = {},
 ): Promise<RecoverResult> {
   // Load our received share for this agent
   const receivedPath = `${stateDir}/.exuvia-received-shares.json`;
@@ -932,17 +935,38 @@ export async function recover(
     throw new Error(`No share stored for agent "${agentId}". Cannot recover.`);
   }
 
+  // usePrevious (Rudel 02.11.2026): recover from the kept previous share
+  // instead of the current one. It is never a silent fallback: if no previous
+  // was kept, or it fails the same decrypt + hash rule as previousOk, we refuse
+  // and leave the current share untouched — mixing rounds recovers garbage.
+  let source: { shareHex: string; shareHash: string } = partnerData;
+  let label = "stored share";
+  if (opts.usePrevious) {
+    if (!partnerData.previous) {
+      throw new Error(
+        `No previous share kept for agent "${agentId}". ` +
+          "Receive with --keep-previous to keep one. Cannot recover from previous.",
+      );
+    }
+    source = partnerData.previous;
+    label = "previous share";
+  }
+
   // Decrypt our share
   let ourShareHex: string;
   try {
-    ourShareHex = decryptShare(partnerData.shareHex, localPassphrase);
+    ourShareHex = decryptShare(source.shareHex, localPassphrase);
   } catch {
-    throw new Error("Failed to decrypt stored share. Wrong passphrase?");
+    throw new Error(`Failed to decrypt ${label}. Wrong passphrase?`);
   }
 
   // Verify integrity
-  if (hashShare(ourShareHex) !== partnerData.shareHash) {
-    throw new Error("Stored share integrity check failed.");
+  if (hashShare(ourShareHex) !== source.shareHash) {
+    throw new Error(
+      opts.usePrevious
+        ? "Previous share integrity check failed (previousOk = false). Refusing to recover from it."
+        : "Stored share integrity check failed.",
+    );
   }
 
   // Combine all shares

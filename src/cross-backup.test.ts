@@ -16,6 +16,7 @@ import {
   readdirSync,
   statSync,
   writeSync as fsWriteSync,
+  mkdirSync,
 } from "fs";
 import { createHash as testHash } from "crypto";
 import { tmpdir } from "os";
@@ -32,6 +33,8 @@ import {
   loadState,
   saveState,
   verifyStateDecrypts,
+  recover,
+  rotate,
 } from "./cross-backup.js";
 
 describe("cross-backup — share encryption", () => {
@@ -1485,5 +1488,132 @@ describe("keep previous — same round only, checked in the library", () => {
     assert.equal(r.keptPrevious, false);
     assert.equal("previous" in file().tyto, false);
     assert.equal(decryptShare(file().tyto.shareHex, "k"), h1);
+  });
+});
+
+// Rudel 02.11.2026: recover --use-previous. Uses the kept previous share, and
+// refuses (never falls back to the current share) if none was kept or it fails
+// the same decrypt + hash rule as status' previousOk.
+describe("recover — usePrevious", () => {
+  let nyxDir: string;
+  let coord: string;
+  const SECRET = "RoundPass!2026";
+  let oldKiroHex: string;
+  let newKiroHex: string;
+
+  before(async () => {
+    nyxDir = mkdtempSync(join(tmpdir(), "exuvia-useprev-nyx-"));
+    coord = mkdtempSync(join(tmpdir(), "exuvia-useprev-tyto-"));
+    const first = await init(
+      "nyx",
+      ["tyto", "kiro"],
+      SECRET,
+      "nyx-key",
+      nyxDir,
+    );
+    const t1 = first.sharesToSend.get("tyto")!;
+    oldKiroHex = first.sharesToSend.get("kiro")!.hex;
+    receiveShare(
+      "nyx",
+      t1.hex,
+      t1.hash,
+      "tyto-key",
+      undefined,
+      coord,
+      loadState(nyxDir)!.roundId,
+    );
+
+    const second = await rotate(SECRET, "nyx-key", nyxDir);
+    const t2 = second.sharesToSend.get("tyto")!;
+    newKiroHex = second.sharesToSend.get("kiro")!.hex;
+    receiveShare(
+      "nyx",
+      t2.hex,
+      t2.hash,
+      "tyto-key",
+      undefined,
+      coord,
+      second.roundId,
+      { keepPrevious: true },
+    );
+  });
+  after(() => {
+    rmSync(nyxDir, { recursive: true, force: true });
+    rmSync(coord, { recursive: true, force: true });
+  });
+
+  it("default still uses the current share", async () => {
+    const r = await recover("nyx", "tyto-key", [newKiroHex], coord);
+    assert.equal(r.passphrase, SECRET);
+  });
+
+  it("the case it exists for: current share + old-round partner share is garbage", async () => {
+    let got: string | undefined;
+    try {
+      got = (await recover("nyx", "tyto-key", [oldKiroHex], coord)).passphrase;
+    } catch {
+      got = undefined;
+    }
+    assert.notEqual(got, SECRET, "mixing rounds must not recover the secret");
+  });
+
+  it("usePrevious + old-round partner share recovers the secret", async () => {
+    const r = await recover("nyx", "tyto-key", [oldKiroHex], coord, {
+      usePrevious: true,
+    });
+    assert.equal(r.passphrase, SECRET);
+    assert.equal(r.sharesUsed, 2);
+  });
+
+  it("refuses when no previous was kept — no silent fallback", async () => {
+    const d = mkdtempSync(join(tmpdir(), "exuvia-useprev-none-"));
+    mkdirSync(join(d, "n"));
+    try {
+      const n = await init(
+        "nyx",
+        ["tyto", "kiro"],
+        SECRET,
+        "nyx-key",
+        join(d, "n"),
+      );
+      const t = n.sharesToSend.get("tyto")!;
+      receiveShare("nyx", t.hex, t.hash, "tyto-key", undefined, d);
+      await assert.rejects(
+        () =>
+          recover("nyx", "tyto-key", [n.sharesToSend.get("kiro")!.hex], d, {
+            usePrevious: true,
+          }),
+        /No previous share kept/,
+      );
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a previous that fails the hash check (previousOk = false)", async () => {
+    const path = join(coord, ".exuvia-received-shares.json");
+    const orig = readFileSync(path, "utf8");
+    try {
+      const j = JSON.parse(orig);
+      j.nyx.previous.shareHash = "0".repeat(64);
+      writeFileSync(path, JSON.stringify(j));
+      await assert.rejects(
+        () =>
+          recover("nyx", "tyto-key", [oldKiroHex], coord, {
+            usePrevious: true,
+          }),
+        /Previous share integrity check failed/,
+      );
+    } finally {
+      writeFileSync(path, orig);
+    }
+  });
+
+  it("refuses a previous that does not decrypt", async () => {
+    await assert.rejects(
+      () =>
+        recover("nyx", "WRONG-key", [oldKiroHex], coord, { usePrevious: true }),
+      /Failed to decrypt previous share/,
+    );
   });
 });
