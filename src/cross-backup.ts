@@ -660,6 +660,36 @@ export function receiveShare(
 }
 
 /**
+ * Drop the kept previous share of one partner (previous step 5, Rudel
+ * 03.11.2026). The counterpart to receive --keep-previous: once the new
+ * round is confirmed, the old secret should be gone on purpose, not only by
+ * the next receive. Needs no passphrase (nothing is decrypted). Refuses an
+ * unknown partner. No previous kept → dropped: false and nothing is written,
+ * so a typo never looks like a cleanup.
+ */
+export function dropPrevious(
+  fromId: string,
+  stateDir: string = ".",
+): { dropped: boolean; version?: number; shareHash?: string } {
+  const receivedPath = `${stateDir}/.exuvia-received-shares.json`;
+  if (!existsSync(receivedPath)) {
+    throw new Error(`No received shares in ${stateDir}; nothing to drop.`);
+  }
+  const received: Record<string, Partner> = JSON.parse(
+    readFileSync(receivedPath, "utf8"),
+  );
+  const entry = received[fromId];
+  if (!entry) {
+    throw new Error(`No share received from "${fromId}"; nothing to drop.`);
+  }
+  if (!entry.previous) return { dropped: false };
+  const { version, shareHash } = entry.previous;
+  delete entry.previous;
+  writePrivateAtomic(receivedPath, JSON.stringify(received, null, 2));
+  return { dropped: true, version, shareHash };
+}
+
+/**
  * Write `content` to `path` as 0600, atomically (Tyto, review #20): a fresh
  * temp file is created 0600, fsynced, then renamed over the target. The new
  * content is never in a 0644 file, and a crash mid-write leaves the old file
