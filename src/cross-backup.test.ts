@@ -1651,7 +1651,9 @@ describe("drop previous — removes only the kept previous, on purpose", () => {
     assert.equal("previous" in after_, false);
     assert.equal(after_.shareHex, before_.shareHex);
     assert.equal(decryptShare(after_.shareHex, "k"), h2);
-    assert.ok(!readFileSync(path(), "utf8").includes(before_.previous.shareHex));
+    assert.ok(
+      !readFileSync(path(), "utf8").includes(before_.previous.shareHex),
+    );
     assert.equal(statSync(path()).mode & 0o777, 0o600);
   });
 
@@ -1666,7 +1668,10 @@ describe("drop previous — removes only the kept previous, on purpose", () => {
 
   it("unknown partner is refused, other partners untouched", () => {
     const raw = readFileSync(path(), "utf8");
-    assert.throws(() => dropPrevious("tyot", dir), /No share received from "tyot"/);
+    assert.throws(
+      () => dropPrevious("tyot", dir),
+      /No share received from "tyot"/,
+    );
     assert.equal(readFileSync(path(), "utf8"), raw);
   });
 

@@ -1308,3 +1308,73 @@ describe("cross-backup recover --use-previous", () => {
     }
   });
 });
+
+describe("cross-backup drop-previous (CLI)", () => {
+  let dir: string;
+  const a = "kiro-share-drop-cli-a";
+  const b = "kiro-share-drop-cli-b";
+  const R1 = "fedcba9876543210fedcba9876543210";
+  const recv = (hex: string, extra: string[] = []) =>
+    runReceive(
+      [
+        "--from",
+        "kiro",
+        "--hash",
+        hashShare(hex),
+        "--local-passphrase-file",
+        join(dir, "lpp"),
+        "--state-dir",
+        dir,
+        "--share-file",
+        "-",
+        "--round",
+        R1,
+        ...extra,
+      ],
+      hex + "\n",
+    );
+  const drop = (extra: string[]) => {
+    const r = spawnSync(
+      process.execPath,
+      [CLI, "cross-backup", "drop-previous", "--state-dir", dir, ...extra],
+      { encoding: "utf8", timeout: 20000 },
+    );
+    return { code: r.status, out: `${r.stdout}${r.stderr}` };
+  };
+  const stored = () =>
+    JSON.parse(readFileSync(join(dir, ".exuvia-received-shares.json"), "utf8"))
+      .kiro;
+
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-cli-drop-"));
+    await init("nyx", ["tyto", "kiro"], "pass", "cli-key", dir);
+    writeFileSync(join(dir, "lpp"), "cli-key\n", { mode: 0o600 });
+    assert.equal(recv(a).code, 0);
+    assert.equal(recv(b, ["--keep-previous"]).code, 0);
+  });
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("drops the kept previous, says DROPPED, current share stays", () => {
+    const cur = stored().shareHex;
+    assert.ok(stored().previous, "precondition");
+    const r = drop(["--from", "kiro"]);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /DROPPED/);
+    assert.equal("previous" in stored(), false);
+    assert.equal(stored().shareHex, cur);
+  });
+
+  it("second call: nothing kept, exit 0, says so", () => {
+    const r = drop(["--from", "kiro"]);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /nothing dropped/);
+    assert.doesNotMatch(r.out, /DROPPED/);
+  });
+
+  it("missing --from or unknown partner: exit 1", () => {
+    assert.equal(drop([]).code, 1);
+    const r = drop(["--from", "tyot"]);
+    assert.equal(r.code, 1);
+    assert.match(r.out, /No share received from "tyot"/);
+  });
+});
