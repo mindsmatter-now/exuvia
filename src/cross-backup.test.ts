@@ -1675,6 +1675,26 @@ describe("drop previous — removes only the kept previous, on purpose", () => {
     assert.equal(readFileSync(path(), "utf8"), raw);
   });
 
+  it("dropping one partner leaves another partner's previous byte-identical", () => {
+    const t1 = "66ff";
+    const t2 = "7700";
+    receiveShare("tyto", t1, hashShare(t1), "k", undefined, dir, R1);
+    receiveShare("tyto", t2, hashShare(t2), "k", undefined, dir, R1, {
+      keepPrevious: true,
+    });
+    receiveShare("kiro", h1, hashShare(h1), "k", undefined, dir, R1, {
+      keepPrevious: true,
+    });
+    const tytoBefore = JSON.stringify(file().tyto);
+    assert.ok(file().tyto.previous, "precondition: tyto previous kept");
+    assert.ok(file().kiro.previous, "precondition: kiro previous kept");
+    const r = dropPrevious("kiro", dir);
+    assert.equal(r.dropped, true);
+    assert.equal("previous" in file().kiro, false);
+    assert.equal(JSON.stringify(file().tyto), tytoBefore);
+    assert.equal(decryptShare(file().tyto.previous.shareHex, "k"), t1);
+  });
+
   it("after drop, recover --use-previous refuses (nothing kept)", async () => {
     await assert.rejects(
       recover("kiro", "k", [], dir, { usePrevious: true }),
