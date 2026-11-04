@@ -50,6 +50,7 @@ import {
   status as crossBackupStatus,
   rotate as crossBackupRotate,
   recover as crossBackupRecover,
+  dropPrevious as crossBackupDropPrevious,
   writePrivateAtomic,
   isRoundId,
   STATE_FILE as CROSS_BACKUP_STATE_FILE,
@@ -114,6 +115,10 @@ Usage:
     Recover a downed agent's passphrase from shares. --shares-file: one hex per line.
     --use-previous: use the kept previous share (see receive --keep-previous);
     refuses if none was kept or it fails decrypt/hash (status: previous ❌).
+
+  exuvia cross-backup drop-previous --from <id> [--state-dir <dir>]
+    Delete the kept previous share of one partner (after the new round is confirmed).
+    Current share untouched, no passphrase needed. Nothing kept -> says so, exit 0, file unchanged.
 
   exuvia version
     Show version.
@@ -873,8 +878,13 @@ async function crossBackupCmd(args: string[]): Promise<void> {
     case "recover":
       await crossBackupRecoverCmd(subArgs);
       break;
+    case "drop-previous":
+      crossBackupDropPreviousCmd(subArgs);
+      break;
     default:
-      log("Usage: exuvia cross-backup <init|receive|status|rotate|recover>");
+      log(
+        "Usage: exuvia cross-backup <init|receive|status|rotate|recover|drop-previous>",
+      );
       log("Run `exuvia` for full help.");
       process.exit(1);
   }
@@ -1280,6 +1290,30 @@ async function crossBackupRotateCmd(args: string[]): Promise<void> {
 
   log(`⚠️  Send new shares to partners via secure channel.`);
   log(`   Old shares are now INVALID.`);
+}
+
+function crossBackupDropPreviousCmd(args: string[]): void {
+  const fromId = getArg(args, "--from");
+  if (!fromId) {
+    console.error("❌ drop-previous needs --from <id>");
+    process.exit(1);
+  }
+  const stateDir = getArg(args, "--state-dir") || ".";
+  try {
+    const r = crossBackupDropPrevious(fromId, stateDir);
+    if (r.dropped) {
+      log(
+        `🗑️  Previous share of ${fromId} DROPPED (v${r.version}, hash ${r.shareHash?.slice(0, 12)}…). The current share is untouched.`,
+      );
+    } else {
+      log(
+        `ℹ️  No previous share kept for ${fromId}; nothing dropped, file unchanged.`,
+      );
+    }
+  } catch (e: any) {
+    console.error(`❌ drop-previous failed: ${e.message}`);
+    process.exit(1);
+  }
 }
 
 async function crossBackupRecoverCmd(args: string[]): Promise<void> {

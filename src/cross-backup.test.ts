@@ -35,6 +35,7 @@ import {
   verifyStateDecrypts,
   recover,
   rotate,
+  dropPrevious,
 } from "./cross-backup.js";
 
 describe("cross-backup — share encryption", () => {
@@ -1614,6 +1615,90 @@ describe("recover — usePrevious", () => {
       () =>
         recover("nyx", "WRONG-key", [oldKiroHex], coord, { usePrevious: true }),
       /Failed to decrypt previous share/,
+    );
+  });
+});
+
+describe("drop previous — removes only the kept previous, on purpose", () => {
+  let dir: string;
+  const R1 = "e".repeat(32);
+  const h1 = "44dd";
+  const h2 = "55ee";
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), "exuvia-drop-"));
+    await init("nyx", ["tyto", "kiro"], "pass", "k", dir);
+  });
+  after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = () => join(dir, ".exuvia-received-shares.json");
+  const file = () => JSON.parse(readFileSync(path(), "utf8"));
+
+  it("refuses when nothing was ever received", () => {
+    assert.throws(() => dropPrevious("kiro", dir), /No received shares/);
+  });
+
+  it("drops the previous, keeps the current share byte-identical", () => {
+    receiveShare("kiro", h1, hashShare(h1), "k", undefined, dir, R1);
+    receiveShare("kiro", h2, hashShare(h2), "k", undefined, dir, R1, {
+      keepPrevious: true,
+    });
+    const before_ = file().kiro;
+    assert.ok(before_.previous, "precondition: previous kept");
+    const r = dropPrevious("kiro", dir);
+    assert.equal(r.dropped, true);
+    assert.equal(r.version, before_.previous.version);
+    assert.equal(r.shareHash, hashShare(h1));
+    const after_ = file().kiro;
+    assert.equal("previous" in after_, false);
+    assert.equal(after_.shareHex, before_.shareHex);
+    assert.equal(decryptShare(after_.shareHex, "k"), h2);
+    assert.ok(
+      !readFileSync(path(), "utf8").includes(before_.previous.shareHex),
+    );
+    assert.equal(statSync(path()).mode & 0o777, 0o600);
+  });
+
+  it("no previous kept: dropped false and the file is not rewritten", () => {
+    const raw = readFileSync(path(), "utf8");
+    const m = statSync(path()).mtimeMs;
+    const r = dropPrevious("kiro", dir);
+    assert.equal(r.dropped, false);
+    assert.equal(readFileSync(path(), "utf8"), raw);
+    assert.equal(statSync(path()).mtimeMs, m);
+  });
+
+  it("unknown partner is refused, other partners untouched", () => {
+    const raw = readFileSync(path(), "utf8");
+    assert.throws(
+      () => dropPrevious("tyot", dir),
+      /No share received from "tyot"/,
+    );
+    assert.equal(readFileSync(path(), "utf8"), raw);
+  });
+
+  it("dropping one partner leaves another partner's previous byte-identical", () => {
+    const t1 = "66ff";
+    const t2 = "7700";
+    receiveShare("tyto", t1, hashShare(t1), "k", undefined, dir, R1);
+    receiveShare("tyto", t2, hashShare(t2), "k", undefined, dir, R1, {
+      keepPrevious: true,
+    });
+    receiveShare("kiro", h1, hashShare(h1), "k", undefined, dir, R1, {
+      keepPrevious: true,
+    });
+    const tytoBefore = JSON.stringify(file().tyto);
+    assert.ok(file().tyto.previous, "precondition: tyto previous kept");
+    assert.ok(file().kiro.previous, "precondition: kiro previous kept");
+    const r = dropPrevious("kiro", dir);
+    assert.equal(r.dropped, true);
+    assert.equal("previous" in file().kiro, false);
+    assert.equal(JSON.stringify(file().tyto), tytoBefore);
+    assert.equal(decryptShare(file().tyto.previous.shareHex, "k"), t1);
+  });
+
+  it("after drop, recover --use-previous refuses (nothing kept)", async () => {
+    await assert.rejects(
+      recover("kiro", "k", [], dir, { usePrevious: true }),
+      /No previous share kept/,
     );
   });
 });
