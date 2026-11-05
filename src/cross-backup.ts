@@ -927,6 +927,135 @@ export interface RecoverResult {
 }
 
 /**
+ * What a helper hands over with its plain share (Rudel 05.11.2026): the hash
+ * of exactly that hex, and the round id of the share it came from ("none" for
+ * shares received before round ids existed, i.e. before 26.10.2026).
+ * The version is deliberately NOT part of it: a received share's version is
+ * a local receive counter, not the sender's rotation (Tyto, cross-backup.ts
+ * receiveShare), so comparing it would look green without proving anything.
+ */
+export interface HelperShareCheck {
+  hash: string;
+  round: string;
+}
+
+export interface OwnShare {
+  shareHex: string;
+  shareHash: string;
+  /** Round id of the stored share, undefined for shares from before 26.10. */
+  roundId?: string;
+  version: number;
+}
+
+/** "none" or a round id, as show-share prints it and recover expects it. */
+export function roundLabel(roundId: string | undefined): string {
+  return roundId ?? "none";
+}
+
+/**
+ * Decrypt and verify the share WE hold for `agentId` (current, or the kept
+ * previous with usePrevious). Shared by recover (coordinator) and showShare
+ * (helper) so both sides apply exactly the same rule. Never falls back from
+ * previous to current.
+ */
+function loadOwnShare(
+  agentId: string,
+  localPassphrase: string,
+  stateDir: string,
+  usePrevious: boolean,
+): OwnShare {
+  const receivedPath = `${stateDir}/.exuvia-received-shares.json`;
+  if (!existsSync(receivedPath)) {
+    throw new Error("No received shares found. Cannot recover.");
+  }
+
+  const received: Record<string, Partner> = JSON.parse(
+    readFileSync(receivedPath, "utf8"),
+  );
+
+  const partnerData = received[agentId];
+  if (!partnerData) {
+    throw new Error(`No share stored for agent "${agentId}". Cannot recover.`);
+  }
+
+  // usePrevious (Rudel 02.11.2026): the kept previous share instead of the
+  // current one. It is never a silent fallback: if no previous was kept, or
+  // it fails the same decrypt + hash rule as previousOk, we refuse — mixing
+  // rounds recovers garbage.
+  let source: {
+    shareHex: string;
+    shareHash: string;
+    roundId?: string;
+    version: number;
+  } = partnerData;
+  let label = "stored share";
+  if (usePrevious) {
+    if (!partnerData.previous) {
+      throw new Error(
+        `No previous share kept for agent "${agentId}". ` +
+          "Receive with --keep-previous to keep one. Cannot recover from previous.",
+      );
+    }
+    source = partnerData.previous;
+    label = "previous share";
+  }
+
+  let shareHex: string;
+  try {
+    shareHex = decryptShare(source.shareHex, localPassphrase);
+  } catch {
+    throw new Error(`Failed to decrypt ${label}. Wrong passphrase?`);
+  }
+
+  if (hashShare(shareHex) !== source.shareHash) {
+    throw new Error(
+      usePrevious
+        ? "Previous share integrity check failed (previousOk = false). Refusing to recover from it."
+        : "Stored share integrity check failed.",
+    );
+  }
+
+  return {
+    shareHex,
+    shareHash: source.shareHash,
+    roundId: source.roundId,
+    version: source.version,
+  };
+}
+
+/**
+ * Helper half of recover (Rudel 05.11.2026): decrypt the share we hold for a
+ * downed agent and hand it out, together with its hash and round, so the
+ * coordinator can check both. Same decrypt + hash rule as recover, same
+ * usePrevious semantics, no fallback.
+ *
+ * Refuses our own id: we never hold a share of ourselves, and asking for it
+ * means the wrong id was typed.
+ *
+ * The caller must never send the hex in the clear (see EXCHANGE-RUNBOOK,
+ * "Recovery"): encrypt it with a fresh transfer passphrase first.
+ */
+export function showShare(
+  agentId: string,
+  localPassphrase: string,
+  stateDir: string = ".",
+  opts: { usePrevious?: boolean } = {},
+): OwnShare {
+  let ownId: string | undefined;
+  try {
+    ownId = loadState(stateDir)?.agentId;
+  } catch {
+    ownId = undefined; // no / unreadable own state: nothing to compare with
+  }
+  if (ownId !== undefined && ownId === agentId) {
+    throw new Error(
+      `"${agentId}" is your own id. show-share takes the id of the agent whose share you hold (the one that is down), not yours.`,
+    );
+  }
+  return loadOwnShare(agentId, localPassphrase, stateDir, !!opts.usePrevious);
+}
+
+/**
  * Recover a downed agent's passphrase by combining shares.
  *
  * This is called by a coordinator (Agent B) who has:
@@ -942,65 +1071,35 @@ export interface RecoverResult {
  * @param stateDir - Directory with received-shares state
  * @param opts.usePrevious - Use the kept previous share instead of the current
  *   one. Refuses (never falls back) if none was kept or it fails decrypt/hash.
+ * @param opts.helpers - One check per additional share, same order (Rudel
+ *   05.11.2026): the share must match its hash, and its round must equal the
+ *   round of OUR source share ("none" only against a source without round, in
+ *   both directions). Any mismatch, missing entry or count mismatch refuses
+ *   before combining. The CLI always passes it; library callers that omit it
+ *   get the old unchecked behaviour.
+ *   ⚠️ This does NOT tell N from N+1 within one round (same round id, and
+ *   the stored version is a local counter). That stays a runbook step.
  */
 export async function recover(
   agentId: string,
   localPassphrase: string,
   additionalShares: string[],
   stateDir: string = ".",
-  opts: { usePrevious?: boolean } = {},
+  opts: { usePrevious?: boolean; helpers?: HelperShareCheck[] } = {},
 ): Promise<RecoverResult> {
-  // Load our received share for this agent
-  const receivedPath = `${stateDir}/.exuvia-received-shares.json`;
-  if (!existsSync(receivedPath)) {
-    throw new Error("No received shares found. Cannot recover.");
-  }
-
-  const received: Record<string, Partner> = JSON.parse(
-    readFileSync(receivedPath, "utf8"),
+  const own = loadOwnShare(
+    agentId,
+    localPassphrase,
+    stateDir,
+    !!opts.usePrevious,
   );
 
-  const partnerData = received[agentId];
-  if (!partnerData) {
-    throw new Error(`No share stored for agent "${agentId}". Cannot recover.`);
-  }
-
-  // usePrevious (Rudel 02.11.2026): recover from the kept previous share
-  // instead of the current one. It is never a silent fallback: if no previous
-  // was kept, or it fails the same decrypt + hash rule as previousOk, we refuse
-  // and leave the current share untouched — mixing rounds recovers garbage.
-  let source: { shareHex: string; shareHash: string } = partnerData;
-  let label = "stored share";
-  if (opts.usePrevious) {
-    if (!partnerData.previous) {
-      throw new Error(
-        `No previous share kept for agent "${agentId}". ` +
-          "Receive with --keep-previous to keep one. Cannot recover from previous.",
-      );
-    }
-    source = partnerData.previous;
-    label = "previous share";
-  }
-
-  // Decrypt our share
-  let ourShareHex: string;
-  try {
-    ourShareHex = decryptShare(source.shareHex, localPassphrase);
-  } catch {
-    throw new Error(`Failed to decrypt ${label}. Wrong passphrase?`);
-  }
-
-  // Verify integrity
-  if (hashShare(ourShareHex) !== source.shareHash) {
-    throw new Error(
-      opts.usePrevious
-        ? "Previous share integrity check failed (previousOk = false). Refusing to recover from it."
-        : "Stored share integrity check failed.",
-    );
+  if (opts.helpers !== undefined) {
+    checkHelperShares(additionalShares, opts.helpers, own.roundId);
   }
 
   // Combine all shares
-  const allShareHexes = [ourShareHex, ...additionalShares];
+  const allShareHexes = [own.shareHex, ...additionalShares];
   const shares = allShareHexes.map(hexToShare);
 
   const passphrase = await combineShares(shares);
@@ -1010,6 +1109,48 @@ export async function recover(
     passphrase,
     sharesUsed: allShareHexes.length,
   };
+}
+
+/**
+ * Check every helper share against its hash and round before anything is
+ * combined. Throws on the first problem; the message never contains a share.
+ */
+export function checkHelperShares(
+  shares: string[],
+  helpers: HelperShareCheck[],
+  ownRoundId: string | undefined,
+): void {
+  if (shares.length !== helpers.length) {
+    throw new Error(
+      `${shares.length} helper share(s) but ${helpers.length} hash/round pair(s): every helper share needs exactly one --hash and one --round, in the same order.`,
+    );
+  }
+  const ownLabel = roundLabel(ownRoundId);
+  shares.forEach((hex, i) => {
+    const n = i + 1;
+    if (!/^[0-9a-f]+$/.test(hex) || hex.length % 2 !== 0) {
+      throw new Error(`Helper share ${n} is not lowercase hex.`);
+    }
+    const h = helpers[i];
+    if (!/^[0-9a-f]{64}$/.test(h.hash)) {
+      throw new Error(`Hash ${n} is not a sha256 (64 lowercase hex chars).`);
+    }
+    if (h.round !== "none" && !isRoundId(h.round)) {
+      throw new Error(
+        `Round ${n} must be a round id (32 lowercase hex chars) or "none".`,
+      );
+    }
+    if (hashShare(hex) !== h.hash) {
+      throw new Error(
+        `Helper share ${n} does not match its hash (wrong transfer passphrase, damaged on the way, or the wrong share). Nothing combined.`,
+      );
+    }
+    if (h.round !== ownLabel) {
+      throw new Error(
+        `Helper share ${n} is from round ${h.round}, our share is from round ${ownLabel}. Both shares must come from the same round. Nothing combined.`,
+      );
+    }
+  });
 }
 
 // ── Status ─────────────────────────────────────────────────────────

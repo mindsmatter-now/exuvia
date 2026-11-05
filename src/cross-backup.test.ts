@@ -36,6 +36,7 @@ import {
   recover,
   rotate,
   dropPrevious,
+  showShare,
 } from "./cross-backup.js";
 
 describe("cross-backup — share encryption", () => {
@@ -1700,5 +1701,250 @@ describe("drop previous — removes only the kept previous, on purpose", () => {
       recover("kiro", "k", [], dir, { usePrevious: true }),
       /No previous share kept/,
     );
+  });
+});
+
+// Rudel 05.11.2026: show-share (helper half of recover) + recover checks every
+// helper share against its hash and round. The version is deliberately not
+// compared (local receive counter, Tyto). N vs N+1 inside one round stays a
+// runbook step; these tests pin down what the tool does and does not catch.
+describe("show-share + recover helper checks", () => {
+  const SECRET = "ShowShare!2026";
+  let nyxDir: string; // the downed agent
+  let tyto: string; // coordinator
+  let kiro: string; // helper
+  let round: string;
+  let n1: {
+    tyto: { hex: string; hash: string };
+    kiro: { hex: string; hash: string };
+  };
+  let n2: {
+    tyto: { hex: string; hash: string };
+    kiro: { hex: string; hash: string };
+  };
+
+  before(async () => {
+    nyxDir = mkdtempSync(join(tmpdir(), "exuvia-show-nyx-"));
+    tyto = mkdtempSync(join(tmpdir(), "exuvia-show-tyto-"));
+    kiro = mkdtempSync(join(tmpdir(), "exuvia-show-kiro-"));
+    const first = await init(
+      "nyx",
+      ["tyto", "kiro"],
+      SECRET,
+      "nyx-key",
+      nyxDir,
+    );
+    round = loadState(nyxDir)!.roundId!;
+    n1 = {
+      tyto: first.sharesToSend.get("tyto")!,
+      kiro: first.sharesToSend.get("kiro")!,
+    };
+    receiveShare(
+      "nyx",
+      n1.tyto.hex,
+      n1.tyto.hash,
+      "tyto-key",
+      undefined,
+      tyto,
+      round,
+    );
+    receiveShare(
+      "nyx",
+      n1.kiro.hex,
+      n1.kiro.hash,
+      "kiro-key",
+      undefined,
+      kiro,
+      round,
+    );
+    const second = await rotate(SECRET, "nyx-key", nyxDir);
+    n2 = {
+      tyto: second.sharesToSend.get("tyto")!,
+      kiro: second.sharesToSend.get("kiro")!,
+    };
+    receiveShare(
+      "nyx",
+      n2.tyto.hex,
+      n2.tyto.hash,
+      "tyto-key",
+      undefined,
+      tyto,
+      round,
+      { keepPrevious: true },
+    );
+    receiveShare(
+      "nyx",
+      n2.kiro.hex,
+      n2.kiro.hash,
+      "kiro-key",
+      undefined,
+      kiro,
+      round,
+      { keepPrevious: true },
+    );
+  });
+  after(() => {
+    for (const d of [nyxDir, tyto, kiro])
+      rmSync(d, { recursive: true, force: true });
+  });
+
+  it("show-share gives the helper's current share, its hash and round", () => {
+    const s = showShare("nyx", "kiro-key", kiro);
+    assert.equal(s.shareHex, n2.kiro.hex);
+    assert.equal(s.shareHash, n2.kiro.hash);
+    assert.equal(s.roundId, round);
+  });
+
+  it("show-share --use-previous gives N, not N+1", () => {
+    const s = showShare("nyx", "kiro-key", kiro, { usePrevious: true });
+    assert.equal(s.shareHex, n1.kiro.hex);
+    assert.equal(s.shareHash, n1.kiro.hash);
+  });
+
+  it("round trip: show-share -> recover with hash + round recovers the secret", async () => {
+    const h = showShare("nyx", "kiro-key", kiro);
+    const r = await recover("nyx", "tyto-key", [h.shareHex], tyto, {
+      helpers: [{ hash: h.shareHash, round: h.roundId! }],
+    });
+    assert.equal(r.passphrase, SECRET);
+  });
+
+  it("round trip with --use-previous on both sides recovers the secret", async () => {
+    const h = showShare("nyx", "kiro-key", kiro, { usePrevious: true });
+    const r = await recover("nyx", "tyto-key", [h.shareHex], tyto, {
+      usePrevious: true,
+      helpers: [{ hash: h.shareHash, round: h.roundId! }],
+    });
+    assert.equal(r.passphrase, SECRET);
+  });
+
+  it("wrong hash (e.g. wrong transfer passphrase) -> refused before combining", async () => {
+    await assert.rejects(
+      () =>
+        recover("nyx", "tyto-key", [n2.kiro.hex], tyto, {
+          helpers: [{ hash: "0".repeat(64), round }],
+        }),
+      /does not match its hash/,
+    );
+  });
+
+  it("different round -> refused", async () => {
+    await assert.rejects(
+      () =>
+        recover("nyx", "tyto-key", [n2.kiro.hex], tyto, {
+          helpers: [{ hash: n2.kiro.hash, round: "a".repeat(32) }],
+        }),
+      /Both shares must come from the same round/,
+    );
+  });
+
+  it('"none" against our share WITH round -> refused', async () => {
+    await assert.rejects(
+      () =>
+        recover("nyx", "tyto-key", [n2.kiro.hex], tyto, {
+          helpers: [{ hash: n2.kiro.hash, round: "none" }],
+        }),
+      /same round/,
+    );
+  });
+
+  it("--use-previous + none -> refused (keep-previous needs a round)", async () => {
+    await assert.rejects(
+      () =>
+        recover("nyx", "tyto-key", [n1.kiro.hex], tyto, {
+          usePrevious: true,
+          helpers: [{ hash: n1.kiro.hash, round: "none" }],
+        }),
+      /same round/,
+    );
+  });
+
+  it("count mismatch -> refused", async () => {
+    await assert.rejects(
+      () => recover("nyx", "tyto-key", [n2.kiro.hex], tyto, { helpers: [] }),
+      /every helper share needs exactly one --hash and one --round/,
+    );
+  });
+
+  it("not hex -> refused", async () => {
+    await assert.rejects(
+      () =>
+        recover("nyx", "tyto-key", ["zz"], tyto, {
+          helpers: [{ hash: hashShare("zz"), round }],
+        }),
+      /not lowercase hex/,
+    );
+  });
+
+  it("KNOWN GAP (Kiro): helper sends N+1 with its correct hash, coordinator uses previous -> passes the checks, gives garbage", async () => {
+    // This is the case the tool cannot catch: same round, correct hash.
+    // The runbook's Phase-4 comparison is the only guard. The test requires
+    // that recover does NOT refuse, so it turns red the day the gap is closed
+    // (Kiro, review #56: a catch that maps a refusal to "not the secret" would
+    // stay green either way). Then: update the runbook, flip this test.
+    let got: string | undefined;
+    try {
+      got = (
+        await recover("nyx", "tyto-key", [n2.kiro.hex], tyto, {
+          usePrevious: true,
+          helpers: [{ hash: n2.kiro.hash, round }],
+        })
+      ).passphrase;
+    } catch (e: any) {
+      assert.fail(
+        `recover refused the N/N+1 mix (${e.message}). Gap closed? Update the runbook and turn this into a "refused" test.`,
+      );
+    }
+    assert.notEqual(got, undefined);
+    assert.notEqual(got, SECRET, "an N/N+1 mix must never give the secret");
+  });
+
+  it("show-share refuses our own id", async () => {
+    await assert.throws(
+      () => showShare("nyx", "nyx-key", nyxDir),
+      /your own id/,
+    );
+  });
+
+  it("show-share --use-previous without kept previous -> refused, no fallback", () => {
+    const d = mkdtempSync(join(tmpdir(), "exuvia-show-noprev-"));
+    try {
+      receiveShare("nyx", n2.kiro.hex, n2.kiro.hash, "k", undefined, d, round);
+      assert.throws(
+        () => showShare("nyx", "k", d, { usePrevious: true }),
+        /No previous share kept/,
+      );
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("show-share with wrong local passphrase -> refused", () => {
+    assert.throws(() => showShare("nyx", "WRONG", kiro), /Failed to decrypt/);
+  });
+
+  it('state from before round ids: "none" on both sides recovers (option A)', async () => {
+    const t = mkdtempSync(join(tmpdir(), "exuvia-show-old-t-"));
+    const k = mkdtempSync(join(tmpdir(), "exuvia-show-old-k-"));
+    try {
+      receiveShare("nyx", n2.tyto.hex, n2.tyto.hash, "tk", undefined, t);
+      receiveShare("nyx", n2.kiro.hex, n2.kiro.hash, "kk", undefined, k);
+      const h = showShare("nyx", "kk", k);
+      assert.equal(h.roundId, undefined);
+      const r = await recover("nyx", "tk", [h.shareHex], t, {
+        helpers: [{ hash: h.shareHash, round: "none" }],
+      });
+      assert.equal(r.passphrase, SECRET);
+      await assert.rejects(
+        () =>
+          recover("nyx", "tk", [h.shareHex], t, {
+            helpers: [{ hash: h.shareHash, round }],
+          }),
+        /same round/,
+      );
+    } finally {
+      rmSync(t, { recursive: true, force: true });
+      rmSync(k, { recursive: true, force: true });
+    }
   });
 });
