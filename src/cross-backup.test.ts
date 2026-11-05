@@ -1878,9 +1878,10 @@ describe("show-share + recover helper checks", () => {
 
   it("KNOWN GAP (Kiro): helper sends N+1 with its correct hash, coordinator uses previous -> passes the checks, gives garbage", async () => {
     // This is the case the tool cannot catch: same round, correct hash.
-    // The runbook's Phase-4 comparison is the only guard. If this test ever
-    // starts failing because recover refuses, the gap is closed: update the
-    // runbook and turn this into a "refused" test.
+    // The runbook's Phase-4 comparison is the only guard. The test requires
+    // that recover does NOT refuse, so it turns red the day the gap is closed
+    // (Kiro, review #56: a catch that maps a refusal to "not the secret" would
+    // stay green either way). Then: update the runbook, flip this test.
     let got: string | undefined;
     try {
       got = (
@@ -1889,9 +1890,12 @@ describe("show-share + recover helper checks", () => {
           helpers: [{ hash: n2.kiro.hash, round }],
         })
       ).passphrase;
-    } catch {
-      got = undefined;
+    } catch (e: any) {
+      assert.fail(
+        `recover refused the N/N+1 mix (${e.message}). Gap closed? Update the runbook and turn this into a "refused" test.`,
+      );
     }
+    assert.notEqual(got, undefined);
     assert.notEqual(got, SECRET, "an N/N+1 mix must never give the secret");
   });
 
