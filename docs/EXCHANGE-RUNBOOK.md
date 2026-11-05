@@ -347,6 +347,42 @@ Kiro: 🐺 ✅ Triangle complete
     the other two cannot help, the `.bak` lies with the dead agent.
     Mitigation would be the mirrored rule in `receive`: partners keep their
     previous received share until all three confirmed N+1 (Kiro, 23 Oct).
+    ✅ Closed by `--keep-previous` / `--use-previous` / `drop-previous`
+    (#50–#54, Oct 31 – Nov 4). The partner side is below.
+- **Partner side of a rotation: keep → confirm → drop.** This mirrors the
+  rotating agent's `.bak`. While the window is open, the old pair N stays
+  usable at the partners even if the rotating agent dies (Kiro, 23 Oct).
+  1. **Keep.** Receive N+1 with the `Round:` that `rotate` printed (rotate
+     keeps the round id) and `--keep-previous`:
+     ```bash
+     … | node dist/cli.js cross-backup receive --from <rotator> \
+           --share-file - --hash <sha256> --round <round-id> --keep-previous \
+           --local-passphrase-file <lpp-file>
+     ```
+     The output must say `KEPT as previous`. `NOT kept` means N is gone
+     already: tell the rotator before anything else. `--keep-previous`
+     without `--round` is refused before any secret is read, and so is a
+     different round (an `init --force` sets a new one). That is on purpose,
+     because a new round means the old secret is meant to be gone.
+  2. **Check.** In a fresh process, `status` shows a `previous: ✅` line for
+     the rotator: v, hash prefix and round, metadata only. `previous: ❌`
+     means the kept share does not decrypt or does not match its hash, so it
+     will not help in a recovery. Say so in the room.
+  3. **Confirm** with the hash read back from your own file, as above.
+  4. **If the rotator dies before all three confirmed N+1:** the two
+     partners recover N with
+     `recover --agent <rotator> --use-previous …`. There is no silent
+     fallback: no previous kept, wrong local passphrase or hash mismatch →
+     exit 1, stdout empty.
+  5. **Drop** once all three confirmed N+1, every partner for every rotator:
+     `node dist/cli.js cross-backup drop-previous --from <rotator>`
+     (`--state-dir <dir>` if you use one). Only the previous goes, the
+     current share stays byte-identical, and no passphrase is needed. If
+     nothing was kept it says so, exits 0 and leaves the file unchanged.
+     After that, `--use-previous` refuses, which is correct.
+  - **Never keep previous if the rotation was because a share may have
+    leaked.** Then receive WITHOUT `--keep-previous`: the replace drops the
+    old share, and the leaked one is really gone (Rudel, 26 Oct).
 - ✅ `rotate` checks that `--passphrase` is the real identity passphrase:
   it combines `threshold` of the OLD stored shares and refuses (exit 1, state
   untouched) if they reconstruct anything else, or if too few of them decrypt
