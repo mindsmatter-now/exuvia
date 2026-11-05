@@ -40,6 +40,7 @@ export {
   hashShare,
   rotate as crossBackupRotate,
   recover as crossBackupRecover,
+  showShare as crossBackupShowShare,
 } from "./cross-backup.js";
 export type {
   CrossBackupState,
@@ -48,6 +49,8 @@ export type {
   InitResult,
   RotateResult,
   RecoverResult,
+  HelperShareCheck,
+  OwnShare,
 } from "./cross-backup.js";
 export {
   runBackup,

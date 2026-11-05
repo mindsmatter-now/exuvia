@@ -50,6 +50,8 @@ import {
   status as crossBackupStatus,
   rotate as crossBackupRotate,
   recover as crossBackupRecover,
+  showShare as crossBackupShowShare,
+  roundLabel,
   dropPrevious as crossBackupDropPrevious,
   writePrivateAtomic,
   isRoundId,
@@ -110,11 +112,24 @@ Usage:
   exuvia cross-backup rotate --passphrase <pp> --local-passphrase-file <file|->   (or --local-passphrase <lpp>; "-" = stdin)
     Rotate shares (re-split with new Shamir).
 
-  exuvia cross-backup recover --agent <id> --local-passphrase-file <file|-> --shares-file <file|-> [--use-previous]
+  exuvia cross-backup recover --agent <id> --local-passphrase-file <file|-> --shares-file <file|-> --hash <sha256> --round <id|none> [--use-previous]
     (or --local-passphrase <lpp> / --shares <hex1,hex2>; "-" = stdin, at most one)
     Recover a downed agent's passphrase from shares. --shares-file: one hex per line.
+    --hash / --round: required, once per helper share, same order as the lines.
+    Printed by the helper's show-share. A wrong hash, a different round, a
+    missing pair or a line that is not hex -> exit 1, nothing combined.
+    "none" matches only a share of ours without round id (before 26 Oct).
+    ⚠️ N vs N+1 within one round is NOT checked by the tool (see runbook).
     --use-previous: use the kept previous share (see receive --keep-previous);
     refuses if none was kept or it fails decrypt/hash (status: previous ❌).
+
+  exuvia cross-backup show-share --agent <id> --local-passphrase-file <file|-> [--use-previous] [--state-dir <dir>]
+    Helper half of recover. <id> = the agent whose share you hold (the one that
+    is down), NOT yourself. stdout: only the plain share hex. stderr: the lines
+    "hash <sha256>" and "round <id|none>" for the coordinator's --hash/--round.
+    Same decrypt + hash rule as recover, no fallback; refusal -> exit 1, stdout empty.
+    ⚠️ Never send the hex in the clear (not over ShellGames): pipe it straight
+    into openssl with a fresh transfer passphrase, under set -o pipefail.
 
   exuvia cross-backup drop-previous --from <id> [--state-dir <dir>]
     Delete the kept previous share of one partner (after the new round is confirmed).
@@ -152,6 +167,15 @@ const STATE_FILE = ".exuvia-state.json";
 function getArg(args: string[], flag: string): string | undefined {
   const idx = args.indexOf(flag);
   return idx >= 0 && idx + 1 < args.length ? args[idx + 1] : undefined;
+}
+
+/** Every value of a repeatable flag, in order (`--hash a --hash b`). */
+function getAllArgs(args: string[], flag: string): string[] {
+  const out: string[] = [];
+  args.forEach((a, i) => {
+    if (a === flag && i + 1 < args.length) out.push(args[i + 1]);
+  });
+  return out;
 }
 
 function hasFlag(args: string[], flag: string): boolean {
@@ -881,9 +905,12 @@ async function crossBackupCmd(args: string[]): Promise<void> {
     case "drop-previous":
       crossBackupDropPreviousCmd(subArgs);
       break;
+    case "show-share":
+      crossBackupShowShareCmd(subArgs);
+      break;
     default:
       log(
-        "Usage: exuvia cross-backup <init|receive|status|rotate|recover|drop-previous>",
+        "Usage: exuvia cross-backup <init|receive|status|rotate|recover|show-share|drop-previous>",
       );
       log("Run `exuvia` for full help.");
       process.exit(1);
@@ -1316,6 +1343,42 @@ function crossBackupDropPreviousCmd(args: string[]): void {
   }
 }
 
+// Rudel 05.11.2026: helper half of recover. stdout = only the share hex, so
+// `show-share … | openssl enc …` never carries anything else; hash and round
+// go to stderr for the coordinator's --hash / --round. A refusal is exit 1
+// with nothing on stdout, which is only safe in a pipe under set -o pipefail
+// (Kiro measured: openssl encrypts empty input with exit 0).
+function crossBackupShowShareCmd(args: string[]): void {
+  const agentId = getArg(args, "--agent");
+  if (!agentId) {
+    console.error(
+      "❌ show-share needs --agent <id> (the agent whose share you hold, not you)",
+    );
+    process.exit(1);
+  }
+  const stateDir = getArg(args, "--state-dir") || ".";
+  assertSingleStdin(args);
+  const localPassphrase = resolveLocalPassphrase(args);
+  const usePrevious = args.includes("--use-previous");
+  try {
+    const s = crossBackupShowShare(agentId, localPassphrase, stateDir, {
+      usePrevious,
+    });
+    info(
+      `🔺 ${usePrevious ? "PREVIOUS" : "Current"} share of ${agentId} (status v${s.version}, local counter):`,
+    );
+    info(`hash ${s.shareHash}`);
+    info(`round ${roundLabel(s.roundId)}`);
+    info(
+      "⚠️  Never send the hex in the clear. Encrypt it with a fresh transfer passphrase (runbook: Recovery).",
+    );
+    process.stdout.write(s.shareHex);
+  } catch (e: any) {
+    console.error(`❌ show-share failed: ${e.message}`);
+    process.exit(1);
+  }
+}
+
 async function crossBackupRecoverCmd(args: string[]): Promise<void> {
   const agentId = getArg(args, "--agent");
   const stateDir = getArg(args, "--state-dir") || ".";
@@ -1336,10 +1399,34 @@ async function crossBackupRecoverCmd(args: string[]): Promise<void> {
     "Shares",
   );
 
-  const additionalShares = sharesArg
-    .split(/[,\n]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  // Rudel 05.11.2026: no silent filtering any more. An empty line between
+  // shares (e.g. a helper whose show-share refused) is an error, not "fewer
+  // shares". Only one trailing newline / surrounding whitespace is tolerated
+  // (resolveSecretArg trims the whole input).
+  const additionalShares = sharesArg.split(/[,\n]/).map((s) => s.trim());
+  const emptyAt = additionalShares.findIndex((s) => s === "");
+  if (emptyAt >= 0) {
+    console.error(
+      `❌ Helper share ${emptyAt + 1} is empty. Did the helper's show-share refuse? Nothing combined.`,
+    );
+    process.exit(1);
+  }
+
+  const hashes = getAllArgs(args, "--hash");
+  const rounds = getAllArgs(args, "--round");
+  if (hashes.length === 0 || rounds.length === 0) {
+    console.error(
+      "❌ recover needs one --hash <sha256> and one --round <id|none> per helper share (printed by the helper's show-share). Nothing combined.",
+    );
+    process.exit(1);
+  }
+  if (hashes.length !== rounds.length) {
+    console.error(
+      `❌ ${hashes.length} --hash but ${rounds.length} --round: one pair per helper share. Nothing combined.`,
+    );
+    process.exit(1);
+  }
+  const helpers = hashes.map((hash, i) => ({ hash, round: rounds[i] }));
 
   const usePrevious = args.includes("--use-previous");
   info(
@@ -1352,7 +1439,7 @@ async function crossBackupRecoverCmd(args: string[]): Promise<void> {
       localPassphrase,
       additionalShares,
       stateDir,
-      { usePrevious },
+      { usePrevious, helpers },
     );
     info(`✅ Recovery successful!`);
     info(`   Agent: ${result.agentId}`);

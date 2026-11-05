@@ -842,12 +842,16 @@ describe("cross-backup recover --local-passphrase-file / --shares-file", () => {
     rmSync(nyxDir, { recursive: true, force: true });
   });
 
+  // Rudel 05.11.2026: --hash/--round are required per helper share.
+  const helper = () => ["--hash", hashShare(kiroHex), "--round", "none"];
+
   it("both from files -> passphrase on stdout, no secret in argv", () => {
     const args = [
       "--local-passphrase-file",
       join(dir, "lpp"),
       "--shares-file",
       join(dir, "shares"),
+      ...helper(),
     ];
     assert.ok(!args.includes(kiroHex) && !args.includes("tyto-key"));
     const r = runRecover(args);
@@ -857,7 +861,13 @@ describe("cross-backup recover --local-passphrase-file / --shares-file", () => {
 
   it("shares from stdin -> recovers", () => {
     const r = runRecover(
-      ["--local-passphrase-file", join(dir, "lpp"), "--shares-file", "-"],
+      [
+        "--local-passphrase-file",
+        join(dir, "lpp"),
+        "--shares-file",
+        "-",
+        ...helper(),
+      ],
       kiroHex + "\n",
     );
     assert.equal(r.code, 0, r.out);
@@ -870,7 +880,7 @@ describe("cross-backup recover --local-passphrase-file / --shares-file", () => {
       "sh",
       [
         "-c",
-        `"${process.execPath}" "${CLI}" cross-backup recover --agent nyx --state-dir "${dir}" --local-passphrase-file "${join(dir, "lpp")}" --shares-file "${join(dir, "shares")}" > "${out}"`,
+        `"${process.execPath}" "${CLI}" cross-backup recover --agent nyx --state-dir "${dir}" --local-passphrase-file "${join(dir, "lpp")}" --shares-file "${join(dir, "shares")}" ${helper().join(" ")} > "${out}"`,
       ],
       { encoding: "utf8", timeout: 30000 },
     );
@@ -1212,6 +1222,8 @@ describe("cross-backup receive --keep-previous (opt-in, one level) + status line
 describe("cross-backup recover --use-previous", () => {
   let dir: string;
   let nyxDir: string;
+  let oldHash: string;
+  let oldRound: string;
   const SECRET = "UsePrevCli!2026";
 
   function run(dirArg: string, extra: string[]) {
@@ -1229,6 +1241,10 @@ describe("cross-backup recover --use-previous", () => {
         join(dirArg, "lpp"),
         "--shares-file",
         join(dirArg, "old-shares"),
+        "--hash",
+        oldHash,
+        "--round",
+        oldRound,
         ...extra,
       ],
       { encoding: "utf8", timeout: 30000 },
@@ -1260,6 +1276,8 @@ describe("cross-backup recover --use-previous", () => {
       first.sharesToSend.get("kiro")!.hex + "\n",
       { mode: 0o600 },
     );
+    oldHash = first.sharesToSend.get("kiro")!.hash;
+    oldRound = round!;
   });
 
   after(() => {
@@ -1376,5 +1394,171 @@ describe("cross-backup drop-previous (CLI)", () => {
     const r = drop(["--from", "tyot"]);
     assert.equal(r.code, 1);
     assert.match(r.out, /No share received from "tyot"/);
+  });
+});
+
+// Rudel 05.11.2026: show-share at the CLI + recover's required --hash/--round.
+describe("cross-backup show-share + recover --hash/--round (CLI)", () => {
+  const SECRET = "ShowShareCli!2026";
+  let nyxDir: string;
+  let tyto: string;
+  let kiro: string;
+  let round: string;
+
+  function cli(args: string[], input?: string) {
+    const r = spawnSync(process.execPath, [CLI, "cross-backup", ...args], {
+      encoding: "utf8",
+      timeout: 30000,
+      input,
+    });
+    return {
+      code: r.status,
+      stdout: r.stdout,
+      stderr: r.stderr,
+      out: `${r.stdout}${r.stderr}`,
+    };
+  }
+
+  before(async () => {
+    nyxDir = mkdtempSync(join(tmpdir(), "exuvia-cli-show-nyx-"));
+    tyto = mkdtempSync(join(tmpdir(), "exuvia-cli-show-tyto-"));
+    kiro = mkdtempSync(join(tmpdir(), "exuvia-cli-show-kiro-"));
+    const first = await init(
+      "nyx",
+      ["tyto", "kiro"],
+      SECRET,
+      "nyx-key",
+      nyxDir,
+    );
+    round = loadState(nyxDir)!.roundId!;
+    const t = first.sharesToSend.get("tyto")!;
+    const k = first.sharesToSend.get("kiro")!;
+    receiveShare("nyx", t.hex, t.hash, "tyto-key", undefined, tyto, round);
+    receiveShare("nyx", k.hex, k.hash, "kiro-key", undefined, kiro, round);
+    writeFileSync(join(tyto, "lpp"), "tyto-key\n", { mode: 0o600 });
+    writeFileSync(join(kiro, "lpp"), "kiro-key\n", { mode: 0o600 });
+  });
+  after(() => {
+    for (const d of [nyxDir, tyto, kiro])
+      rmSync(d, { recursive: true, force: true });
+  });
+
+  const show = (extra: string[] = []) =>
+    cli([
+      "show-share",
+      "--agent",
+      "nyx",
+      "--state-dir",
+      kiro,
+      "--local-passphrase-file",
+      join(kiro, "lpp"),
+      ...extra,
+    ]);
+
+  it("stdout is exactly the share hex, hash + round on stderr", () => {
+    const r = show();
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.stdout, /^[0-9a-f]+$/);
+    assert.ok(r.stderr.includes(`hash ${hashShare(r.stdout)}`), r.out);
+    assert.ok(r.stderr.includes(`round ${round}`), r.out);
+  });
+
+  it("round trip at the CLI: show-share -> recover --hash --round", () => {
+    const h = show();
+    const r = cli(
+      [
+        "recover",
+        "--agent",
+        "nyx",
+        "--state-dir",
+        tyto,
+        "--local-passphrase-file",
+        join(tyto, "lpp"),
+        "--shares-file",
+        "-",
+        "--hash",
+        hashShare(h.stdout),
+        "--round",
+        round,
+      ],
+      h.stdout + "\n",
+    );
+    assert.equal(r.code, 0, r.out);
+    assert.equal(r.stdout, SECRET);
+  });
+
+  it("recover without --hash/--round -> exit 1, stdout empty", () => {
+    const h = show();
+    const r = cli(
+      [
+        "recover",
+        "--agent",
+        "nyx",
+        "--state-dir",
+        tyto,
+        "--local-passphrase-file",
+        join(tyto, "lpp"),
+        "--shares-file",
+        "-",
+      ],
+      h.stdout + "\n",
+    );
+    assert.equal(r.code, 1, r.out);
+    assert.equal(r.stdout, "");
+    assert.match(r.out, /needs one --hash/);
+  });
+
+  it("an empty line between shares -> exit 1 (no silent filtering)", () => {
+    const h = show();
+    const r = cli(
+      [
+        "recover",
+        "--agent",
+        "nyx",
+        "--state-dir",
+        tyto,
+        "--local-passphrase-file",
+        join(tyto, "lpp"),
+        "--shares-file",
+        "-",
+        "--hash",
+        hashShare(h.stdout),
+        "--round",
+        round,
+      ],
+      h.stdout + "\n\n" + h.stdout + "\n",
+    );
+    assert.equal(r.code, 1, r.out);
+    assert.equal(r.stdout, "");
+    assert.match(r.out, /Helper share 2 is empty/);
+  });
+
+  it("show-share for our own id -> exit 1, stdout empty", () => {
+    const r = cli([
+      "show-share",
+      "--agent",
+      "nyx",
+      "--state-dir",
+      nyxDir,
+      "--local-passphrase",
+      "nyx-key",
+    ]);
+    assert.equal(r.code, 1, r.out);
+    assert.equal(r.stdout, "");
+    assert.match(r.out, /your own id/);
+  });
+
+  it("refusal inside a pipe: only set -o pipefail makes it visible (Kiro)", () => {
+    const base = `"${process.execPath}" "${CLI}" cross-backup show-share --agent nyx --state-dir "${kiro}" --local-passphrase WRONG | cat >/dev/null`;
+    const without = spawnSync("bash", ["-c", base], { encoding: "utf8" });
+    const withPf = spawnSync("bash", ["-c", `set -o pipefail; ${base}`], {
+      encoding: "utf8",
+    });
+    assert.equal(
+      without.status,
+      0,
+      "without pipefail the refusal is swallowed",
+    );
+    assert.equal(withPf.status, 1, "with pipefail the refusal stops the pipe");
   });
 });
