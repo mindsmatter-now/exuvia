@@ -392,6 +392,44 @@ describe("cross-backup rotate --shares-out", () => {
     );
   });
 
+  // Kiro, review #57: rotate takes the ids from the state, not from
+  // --partners. A state written by an old, unchecked init must not get
+  // around the id rule.
+  it("state with partner id `../x` -> exit 1, nothing written, state byte-equal", () => {
+    const bad = join(root, "bad-state");
+    mkdirSync(bad, { mode: 0o700 });
+    const good = readFileSync(join(s, STATE_FILE), "utf8");
+    const j = JSON.parse(good);
+    j.partners[1].id = "../x";
+    writeFileSync(join(bad, STATE_FILE), JSON.stringify(j, null, 2), {
+      mode: 0o600,
+    });
+    const before = readFileSync(join(bad, STATE_FILE), "utf8");
+    const parent = join(root, "rot-pid");
+    mkdirSync(parent, { mode: 0o700 });
+    const dir = outDir(parent, "out");
+    const r = cli([
+      "rotate",
+      "--passphrase-file",
+      join(root, "pp"),
+      "--local-passphrase-file",
+      join(root, "lpp"),
+      "--state-dir",
+      bad,
+      "--shares-out",
+      dir,
+    ]);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /not a plain name/);
+    assert.equal(readFileSync(join(bad, STATE_FILE), "utf8"), before);
+    assert.deepEqual(readdirSync(dir), []);
+    assert.ok(!existsSync(join(parent, "x.share")), "share file one level up");
+    assert.deepEqual(
+      readdirSync(bad).filter((f) => f.includes(".bak-")),
+      [],
+    );
+  });
+
   it("writes the NEW shares; hashes match the rotated state", () => {
     const dir = outDir(root, "out");
     const r = rot(["--shares-out", dir]);
@@ -450,6 +488,17 @@ describe("shares-out helpers", () => {
       ),
       [],
     );
+  });
+
+  it("belt: writeSharesOut never writes outside the dir, even if the id rule were gone", () => {
+    // Exercised by the red probe (id rule off): ids with "/" are then caught
+    // here. With the rule on, the id check fires first; both are refusals.
+    const dir = outDir(root, "belt");
+    assert.throws(
+      () => writeSharesOut(dir, new Map([["../y", { hex: "aa", hash: "h" }]])),
+      /not a plain name|not directly inside/,
+    );
+    assert.ok(!existsSync(join(root, "y.share")));
   });
 
   it("writeSharesOut removes what it created when a later file fails", () => {

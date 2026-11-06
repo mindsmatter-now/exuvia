@@ -194,6 +194,15 @@ export function writeSharesOut(
     for (const [partnerId, share] of shares) {
       const sharePath = join(real, shareFileName(partnerId));
       const hashPath = join(real, hashFileName(partnerId));
+      // Belt (Kiro, review #57): whatever the id rule says, a file must land
+      // directly in the checked directory.
+      for (const p of [sharePath, hashPath]) {
+        if (dirname(p) !== real) {
+          throw new Error(
+            `refusing to write ${p}: not directly inside --shares-out ${real}`,
+          );
+        }
+      }
       writeExcl(sharePath, `${share.hex}\n`);
       created.push(sharePath);
       writeExcl(hashPath, `${share.hash}\n`);
