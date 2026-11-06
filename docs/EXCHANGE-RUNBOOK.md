@@ -57,13 +57,28 @@ All three agents run simultaneously:
 node dist/cli.js cross-backup init \
   --agent <name> --partners <p1>,<p2> \
   --identity-dir <path> --passphrase-file <identity-pp-file> \
-  --local-passphrase-file <lpp-file>
+  --local-passphrase-file <lpp-file> \
+  --shares-out <shares-dir>
 ```
+`<shares-dir>` must already exist with mode 0700, owned by you, preferably a
+tmpfs (`install -d -m 700 /dev/shm/exuvia-shares`). init refuses (exit 1,
+nothing written) if it lies inside a git worktree or inside `--state-dir`, or
+if a share file is already there; it warns if it is not a tmpfs (#42, Tyto).
+
 init re-reads `<lpp-file>` after writing the state and decrypts every share
 with what is actually stored. A typo or an unsaved file fails here, not
 months later.
 
-It prints, per partner, a share hex and its SHA-256 hash.
+It writes, per partner, `<shares-dir>/<partner>.share` (the share hex) and
+`<partner>.share.sha256` (its hash), both 0600 and never overwritten. The
+terminal shows only the hash and the path, never the share (before 06 Nov it
+printed a 32-char prefix, which is how the state file got used on 13 May).
+`rotate` takes the same `--shares-out`.
+
+**The hash comes only from the sender's init output.** The receiver never
+computes it; on a mismatch abort, no "workaround: computed hash" (Kiro, 05 Nov).
+In Phase 2, `<share-hex>` is read from `<shares-dir>/<partner>.share`;
+`shred -u` the files once the partner confirmed the hash.
 
 Confirm in ShellGames: "✅ Init complete" before proceeding.
 
@@ -73,7 +88,8 @@ For each partner, three pieces on two channels:
 - **Encrypted share** → ShellGames DM to that partner. Never the plain hex:
   ```bash
   # tpp-<partner> = 0600 file in a tmpfs, holding the transfer passphrase for that partner
-  printf %s "<share-hex>" | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -a -A \
+  # <share-hex> = contents of <shares-dir>/<partner>.share from Phase 1
+  tr -d '\n' < <shares-dir>/<partner>.share | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -a -A \
     -pass file:tpp-<partner>
   ```
 - **Transfer passphrase + hash: use the GPG way below (decided 11 Oct).**

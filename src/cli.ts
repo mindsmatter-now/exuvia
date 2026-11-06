@@ -56,7 +56,9 @@ import {
   writePrivateAtomic,
   isRoundId,
   STATE_FILE as CROSS_BACKUP_STATE_FILE,
+  loadState as crossBackupLoadState,
 } from "./cross-backup.js";
+import { checkSharesOutDir, writeSharesOut } from "./shares-out.js";
 import { join, dirname } from "path";
 import { createInterface } from "readline";
 
@@ -99,7 +101,7 @@ Usage:
   exuvia dms-status [--server url]
     Check DMS status (last ping, hours remaining).
 
-  exuvia cross-backup init --agent <id> --partners <p1,p2> --passphrase <pp> --local-passphrase-file <file>
+  exuvia cross-backup init --agent <id> --partners <p1,p2> --passphrase <pp> --local-passphrase-file <file> [--shares-out <0700 dir>]
     (--local-passphrase <lpp> still works, but only the file variant proves the passphrase is kept)
     Initialize cross-backup: split passphrase into Shamir shares.
 
@@ -109,7 +111,7 @@ Usage:
   exuvia cross-backup status --local-passphrase-file <file|->   (or --local-passphrase <lpp>; "-" = stdin)
     Show cross-backup triangle status.
 
-  exuvia cross-backup rotate --passphrase <pp> --local-passphrase-file <file|->   (or --local-passphrase <lpp>; "-" = stdin)
+  exuvia cross-backup rotate --passphrase <pp> --local-passphrase-file <file|->   (or --local-passphrase <lpp>; "-" = stdin) [--shares-out <0700 dir>]
     Rotate shares (re-split with new Shamir).
 
   exuvia cross-backup recover --agent <id> --local-passphrase-file <file|-> --shares-file <file|-> --hash <sha256> --round <id|none> [--use-previous]
@@ -917,6 +919,63 @@ async function crossBackupCmd(args: string[]): Promise<void> {
   }
 }
 
+/**
+ * Share output for init/rotate (Rudel, 06 Nov 2026): with --shares-out the
+ * full shares go into 0600 files, the terminal shows hash + path only.
+ * Without it, only the hash is shown and the operator is told to use
+ * --shares-out: the old 32-char prefix was neither the share nor safe.
+ */
+function printShares(
+  shares: Map<string, { hex: string; hash: string }>,
+  sharesOut: string | undefined,
+): void {
+  if (sharesOut) {
+    const written = writeSharesOut(sharesOut, shares);
+    for (const w of written) {
+      log(`   ${w.partnerId}: ${w.sharePath} (0600)`);
+      log(`   Hash: ${w.hash}  (also in ${w.hashPath})`);
+      log("");
+    }
+    log(
+      `   Phase 2: receive --share-file <file> --hash <hash from THIS output>.`,
+    );
+    log(
+      `   The receiver never computes the hash itself; on mismatch: abort (Kiro).`,
+    );
+    log(`   Delete the files once each partner confirmed the hash.`);
+    return;
+  }
+  for (const [partnerId, share] of shares) {
+    log(
+      `   ${partnerId}: (share not shown — rerun with --shares-out <0700 dir>)`,
+    );
+    log(`   Hash: ${share.hash}`);
+    log("");
+  }
+}
+
+/** Validate --shares-out before anything is written; exit 1 on refusal. */
+function precheckSharesOut(
+  args: string[],
+  stateDir: string,
+  partnerIds: string[],
+): string | undefined {
+  const dir = getArg(args, "--shares-out");
+  if (hasFlag(args, "--shares-out") && !dir) {
+    console.error("❌ --shares-out needs a directory");
+    process.exit(1);
+  }
+  if (!dir) return undefined;
+  try {
+    for (const w of checkSharesOutDir(dir, stateDir, partnerIds))
+      console.error(w);
+  } catch (e) {
+    console.error(`❌ ${(e as Error).message}. Nothing was written.`);
+    process.exit(1);
+  }
+  return dir;
+}
+
 async function crossBackupInitCmd(args: string[]): Promise<void> {
   const agentId = getArg(args, "--agent");
   const partnersArg = getArg(args, "--partners");
@@ -932,6 +991,7 @@ async function crossBackupInitCmd(args: string[]): Promise<void> {
   }
 
   const partnerIds = partnersArg.split(",").map((s) => s.trim());
+  const sharesOut = precheckSharesOut(args, stateDir, partnerIds);
   const passphrase = getPassphrase(args);
   // Prefer --local-passphrase-file: init then re-reads the FILE after writing the
   // state and verifies with what is actually stored (not with what we typed).
@@ -1010,11 +1070,7 @@ async function crossBackupInitCmd(args: string[]): Promise<void> {
   log(`   Round: ${result.state.roundId ?? "(none)"}\n`);
 
   log(`📤 Shares to distribute:`);
-  for (const [partnerId, share] of result.sharesToSend) {
-    log(`   ${partnerId}: ${share.hex.slice(0, 32)}...`);
-    log(`   Hash: ${share.hash}`);
-    log("");
-  }
+  printShares(result.sharesToSend, sharesOut);
 
   log(`⚠️  Send these shares via a SEPARATE secure channel (NOT ShellGames!)`);
   log(`   Each partner needs: share hex + hash for verification.`);
@@ -1280,6 +1336,11 @@ async function crossBackupRotateCmd(args: string[]): Promise<void> {
   const localPassphrase = resolveLocalPassphrase(args);
   const passphrase = getPassphrase(args);
   const stateDir = getArg(args, "--state-dir") || ".";
+  const sharesOut = precheckSharesOut(
+    args,
+    stateDir,
+    (crossBackupLoadState(stateDir)?.partners ?? []).map((p) => p.id),
+  );
 
   // rotate overwrites the local share BEFORE the partners have the new ones
   // (Tyto, 12 Oct). Keep the old state as a 0600 .bak-<time> first, like
@@ -1309,11 +1370,7 @@ async function crossBackupRotateCmd(args: string[]): Promise<void> {
   log(`   Round: ${result.roundId ?? "(none)"} (unchanged by rotate)\n`);
 
   log(`📤 New shares to distribute:`);
-  for (const [partnerId, share] of result.sharesToSend) {
-    log(`   ${partnerId}: ${share.hex.slice(0, 32)}...`);
-    log(`   Hash: ${share.hash}`);
-    log("");
-  }
+  printShares(result.sharesToSend, sharesOut);
 
   log(`⚠️  Send new shares to partners via secure channel.`);
   log(`   Old shares are now INVALID.`);
