@@ -15,6 +15,10 @@
  *  - must not lie inside a git worktree, and not inside / equal --state-dir
  *  - files are created with O_EXCL (never overwrite), mode 0600
  *  - warn (do not refuse) if it is not a tmpfs
+ *  - partner ids become file names, so each must be a plain name
+ *    (Tyto, review #57: `--partners ../x` wrote one level above the
+ *    checked directory and bypassed every rule above)
+ *  - --state-dir must not lie inside it either (Tyto ⚪, review #57)
  * Everything is checked BEFORE init/rotate touch the state.
  */
 import {
@@ -33,10 +37,26 @@ import { join, dirname, sep } from "path";
 /** Linux TMPFS_MAGIC (statfs f_type). */
 const TMPFS_MAGIC = 0x01021994;
 
+/**
+ * A partner id that is safe as a file name: lowercase letters, digits, "_"
+ * and "-", starting with a letter or digit. No "/", no "..", no dot files.
+ */
+const SAFE_PARTNER_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+export function assertSafePartnerId(partnerId: string): void {
+  if (!SAFE_PARTNER_ID.test(partnerId)) {
+    throw new Error(
+      `partner id ${JSON.stringify(partnerId)} is not a plain name (a-z, 0-9, _ and -, max 64); it becomes a file name in --shares-out`,
+    );
+  }
+}
+
 export function shareFileName(partnerId: string): string {
+  assertSafePartnerId(partnerId);
   return `${partnerId}.share`;
 }
 export function hashFileName(partnerId: string): string {
+  assertSafePartnerId(partnerId);
   return `${partnerId}.share.sha256`;
 }
 
@@ -68,6 +88,9 @@ export function checkSharesOutDir(
   partnerIds: string[],
   fsType: (d: string) => number = (d) => Number(statfsSync(d).type),
 ): string[] {
+  // Ids first: they decide where files go, so nothing else is meaningful
+  // until every one of them is a plain name.
+  for (const p of partnerIds) assertSafePartnerId(p);
   if (!existsSync(dir)) {
     throw new Error(
       `--shares-out ${dir} does not exist (create it first: mkdir -m 700)`,
@@ -97,6 +120,11 @@ export function checkSharesOutDir(
     if (inside(real, realState)) {
       throw new Error(
         `--shares-out ${dir} lies inside --state-dir ${stateDir}; keep plaintext shares apart from the state`,
+      );
+    }
+    if (inside(realState, real)) {
+      throw new Error(
+        `--state-dir ${stateDir} lies inside --shares-out ${dir}; keep plaintext shares apart from the state`,
       );
     }
   }

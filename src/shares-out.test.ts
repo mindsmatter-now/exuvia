@@ -289,6 +289,49 @@ describe("cross-backup init --shares-out refusals: exit 1, nothing written", () 
     assert.ok(!existsSync(join(s, STATE_FILE)));
   });
 
+  // Tyto, review #57: a partner id is a file name. `../x` wrote one level
+  // above the checked directory and bypassed every rule.
+  it("partner id with a path (`--partners ../x`) -> exit 1, nothing anywhere", () => {
+    const parent = join(root, "pid");
+    mkdirSync(parent, { mode: 0o700 });
+    const dir = outDir(parent, "out");
+    const s = fresh("pid");
+    const r = cli([
+      "init",
+      "--agent",
+      "nyx",
+      "--partners",
+      "tyto,../x",
+      "--passphrase",
+      "so-pass",
+      "--state-dir",
+      s,
+      "--local-passphrase-file",
+      join(root, "lpp"),
+      "--shares-out",
+      dir,
+    ]);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /not a plain name/);
+    assert.match(r.out, /Nothing was written/);
+    assert.ok(!existsSync(join(s, STATE_FILE)), "state written");
+    assert.deepEqual(readdirSync(dir), [], "share file in the checked dir");
+    assert.ok(!existsSync(join(parent, "x.share")), "share file one level up");
+    assert.ok(!existsSync(join(parent, "x.share.sha256")));
+  });
+
+  it("--state-dir inside --shares-out -> refused too (both directions)", () => {
+    const dir = outDir(root, "outer");
+    const s = join(dir, "state-in-out");
+    mkdirSync(s, { mode: 0o700 });
+    assertNothing(
+      s,
+      dir,
+      run(s, dir),
+      /--state-dir .* lies inside --shares-out/,
+    );
+  });
+
   it("--shares-out without a value", () => {
     const s = fresh("novalue");
     const r = cli([
@@ -378,6 +421,33 @@ describe("shares-out helpers", () => {
     );
     assert.deepEqual(
       checkSharesOutDir(dir, st, ["a"], () => 0x01021994),
+      [],
+    );
+  });
+
+  it("unsafe partner ids are refused before anything is checked or written", () => {
+    const dir = outDir(root, "ids");
+    const st = join(root, "st");
+    for (const bad of ["../x", "a/b", "..", ".", ".hidden", "", "A", "x y"]) {
+      assert.throws(
+        () => checkSharesOutDir(dir, st, ["ok", bad], () => 0x01021994),
+        /not a plain name/,
+        JSON.stringify(bad),
+      );
+      assert.throws(
+        () => writeSharesOut(dir, new Map([[bad, { hex: "aa", hash: "h" }]])),
+        /not a plain name/,
+        JSON.stringify(bad),
+      );
+    }
+    assert.deepEqual(readdirSync(dir), []);
+    assert.deepEqual(
+      checkSharesOutDir(
+        dir,
+        st,
+        ["nyx", "tyto", "kiro", "a-1_b"],
+        () => 0x01021994,
+      ),
       [],
     );
   });
