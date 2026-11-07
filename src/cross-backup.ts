@@ -129,6 +129,16 @@ function deriveShareKey(passphrase: string, salt: Buffer): Buffer {
  * Uses AES-256-GCM with scrypt-derived key (N=2^17, r=8, p=1).
  * Format: salt(32) + iv(12) + ciphertext + authTag(16) → hex
  */
+/**
+ * Length of the encrypted state field for a plain share of `shareLength` hex
+ * chars. encryptShare encrypts the hex TEXT (one byte per char) and adds
+ * salt (32) + iv (12) + GCM tag (16) bytes; all of it is hex again:
+ * 2 * (shareLength + 60). Kiro, 05.11.2026: a 66-char share -> 252.
+ */
+export function blobLengthFor(shareLength: number): number {
+  return 2 * (shareLength + 60);
+}
+
 export function encryptShare(shareHex: string, passphrase: string): string {
   const salt = randomBytes(32);
   const key = deriveShareKey(passphrase, salt);
@@ -1095,7 +1105,12 @@ export async function recover(
   );
 
   if (opts.helpers !== undefined) {
-    checkHelperShares(additionalShares, opts.helpers, own.roundId);
+    checkHelperShares(
+      additionalShares,
+      opts.helpers,
+      own.roundId,
+      own.shareHex.length,
+    );
   }
 
   // Combine all shares
@@ -1119,6 +1134,7 @@ export function checkHelperShares(
   shares: string[],
   helpers: HelperShareCheck[],
   ownRoundId: string | undefined,
+  ownLength?: number,
 ): void {
   if (shares.length !== helpers.length) {
     throw new Error(
@@ -1130,6 +1146,18 @@ export function checkHelperShares(
     const n = i + 1;
     if (!/^[0-9a-f]+$/.test(hex) || hex.length % 2 !== 0) {
       throw new Error(`Helper share ${n} is not lowercase hex.`);
+    }
+    // Rudel 05./06.11.2026 (Kiro, Nyx): all shares of one secret have the
+    // same length. A share of length blobLengthFor(ours) is the encrypted
+    // state field and not the plain share; Kiro measured that case on 05.11.
+    // (252 vs 66). No fixed
+    // length is assumed: we compare with OUR share of the same secret.
+    if (ownLength !== undefined && hex.length !== ownLength) {
+      throw new Error(
+        hex.length === blobLengthFor(ownLength)
+          ? `Helper share ${n} has ${hex.length} hex chars, exactly the length of an encrypted copy of our ${ownLength}-char share: that is the ENCRYPTED state field, not the plain share. The helper should use show-share. Nothing combined.`
+          : `Helper share ${n} has ${hex.length} hex chars, our share of the same secret has ${ownLength}. Shares of one secret are always the same length. Nothing combined.`,
+      );
     }
     const h = helpers[i];
     if (!/^[0-9a-f]{64}$/.test(h.hash)) {
