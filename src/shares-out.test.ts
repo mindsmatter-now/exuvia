@@ -490,6 +490,18 @@ describe("shares-out helpers", () => {
     );
   });
 
+  it("ids are checked FIRST: a bad id wins over a missing directory", () => {
+    // Kiro, review #57: without the first loop the later shareFileName check
+    // still refuses, so no other test sees it. Here the directory does not
+    // exist; only the first loop names the id instead of the directory.
+    const missing = join(root, "does-not-exist");
+    assert.throws(
+      () => checkSharesOutDir(missing, join(root, "st"), ["../x"]),
+      /not a plain name/,
+    );
+    assert.ok(!existsSync(missing));
+  });
+
   it("belt: writeSharesOut never writes outside the dir, even if the id rule were gone", () => {
     // Exercised by the red probe (id rule off): ids with "/" are then caught
     // here. With the rule on, the id check fires first; both are refusals.

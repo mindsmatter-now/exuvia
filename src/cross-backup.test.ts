@@ -28,6 +28,7 @@ import {
   verifyShare,
   status,
   encryptShare,
+  blobLengthFor,
   decryptShare,
   hashShare,
   loadState,
@@ -1873,6 +1874,37 @@ describe("show-share + recover helper checks", () => {
           helpers: [{ hash: hashShare("zz"), round }],
         }),
       /not lowercase hex/,
+    );
+  });
+
+  it("blobLengthFor matches Kiro's measurement (66 -> 252)", () => {
+    assert.equal(blobLengthFor(66), 252);
+    assert.equal(encryptShare("ab".repeat(33), "k").length, 252);
+  });
+
+  it("blob (encrypted state field) as helper share, with its own hash -> refused as blob", async () => {
+    // Kiro 05.11.: the case a hash cannot catch, because the helper hashes
+    // what it sends. Its own matching hash, round correct, only the length
+    // gives it away.
+    const blob = encryptShare(n2.kiro.hex, "kiro-key");
+    assert.equal(blob.length, blobLengthFor(n2.kiro.hex.length));
+    await assert.rejects(
+      () =>
+        recover("nyx", "tyto-key", [blob], tyto, {
+          helpers: [{ hash: hashShare(blob), round }],
+        }),
+      /ENCRYPTED state field, not the plain share/,
+    );
+  });
+
+  it("helper share of another length (cut off on the way) -> refused, never combined", async () => {
+    const cut = n2.kiro.hex.slice(0, -2);
+    await assert.rejects(
+      () =>
+        recover("nyx", "tyto-key", [cut], tyto, {
+          helpers: [{ hash: hashShare(cut), round }],
+        }),
+      /Shares of one secret are always the same length/,
     );
   });
 
