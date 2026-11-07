@@ -1709,6 +1709,62 @@ describe("drop previous — removes only the kept previous, on purpose", () => {
 // helper share against its hash and round. The version is deliberately not
 // compared (local receive counter, Tyto). N vs N+1 inside one round stays a
 // runbook step; these tests pin down what the tool does and does not catch.
+/** x coordinate of a share: the library stores it in the last byte. */
+function shareX(hex: string): number {
+  return parseInt(hex.slice(-2), 16);
+}
+
+/**
+ * Rotate until the chosen share's x differs from `avoid`. Never more than
+ * `maxTries` times: twenty equal rolls in a row are (1/255)^20, so hitting
+ * the cap means the dice are stuck, and that must be loud, not a pass.
+ */
+async function rotateAvoidingX<T>(
+  rotateOnce: () => Promise<T>,
+  xOf: (r: T) => number,
+  avoid: number,
+  maxTries = 20,
+): Promise<T> {
+  for (let i = 0; i < maxTries; i++) {
+    const r = await rotateOnce();
+    if (xOf(r) !== avoid) return r;
+  }
+  throw new Error(
+    `x coordinate still ${avoid} after ${maxTries} rotations: the dice are stuck, not unlucky`,
+  );
+}
+
+describe("rotateAvoidingX (test helper, Kiro 07 Nov)", () => {
+  it("stuck dice -> loud error after exactly maxTries, never a pass", async () => {
+    let calls = 0;
+    await assert.rejects(
+      rotateAvoidingX(
+        async () => {
+          calls++;
+          return 7;
+        },
+        (x) => x,
+        7,
+        20,
+      ),
+      /still 7 after 20 rotations: the dice are stuck/,
+    );
+    assert.equal(calls, 20);
+  });
+
+  it("returns the first roll whose x differs", async () => {
+    const rolls = [7, 7, 9, 11];
+    let calls = 0;
+    const got = await rotateAvoidingX(
+      async () => rolls[calls++],
+      (x) => x,
+      7,
+    );
+    assert.equal(got, 9);
+    assert.equal(calls, 3);
+  });
+});
+
 describe("show-share + recover helper checks", () => {
   const SECRET = "ShowShare!2026";
   let nyxDir: string; // the downed agent
@@ -1758,7 +1814,15 @@ describe("show-share + recover helper checks", () => {
       kiro,
       round,
     );
-    const second = await rotate(SECRET, "nyx-key", nyxDir);
+    // Kiro + Tyto, 07 Nov (both measured 17/5000): the library picks the
+    // x coordinate (last byte) at random per split. If n1.tyto and n2.kiro
+    // share it, combine refuses with "duplicate" and the KNOWN GAP test fails
+    // by chance (~1/255). Roll again until they differ, with a hard cap.
+    const second = await rotateAvoidingX(
+      () => rotate(SECRET, "nyx-key", nyxDir),
+      (r) => shareX(r.sharesToSend.get("kiro")!.hex),
+      shareX(n1.tyto.hex),
+    );
     n2 = {
       tyto: second.sharesToSend.get("tyto")!,
       kiro: second.sharesToSend.get("kiro")!,
@@ -1914,6 +1978,8 @@ describe("show-share + recover helper checks", () => {
     // that recover does NOT refuse, so it turns red the day the gap is closed
     // (Kiro, review #56: a catch that maps a refusal to "not the secret" would
     // stay green either way). Then: update the runbook, flip this test.
+    // Precondition from before(): no x collision, so a refusal here is real.
+    assert.notEqual(shareX(n2.kiro.hex), shareX(n1.tyto.hex));
     let got: string | undefined;
     try {
       got = (
