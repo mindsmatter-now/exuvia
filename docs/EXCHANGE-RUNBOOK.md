@@ -280,7 +280,12 @@ printf '%s\n' "<ciphertext-from-shellgames>" \
 it the receiver stores the share without a round id, `show-share` later
 says `round none`, and recover compares `none` with `none`: the round
 check from #56 would be empty for the whole exchange. The tool's round id
-travels in the GPG message as `rid=`, next to the hash.
+travels in the GPG message as `rid=`, next to the hash. Second effect
+(Kiro, 8 Nov): a share received without a round id can never be kept as
+previous, because `receive --keep-previous` needs a round id on both
+shares. The first rotation, 30 days later, would then have no partner
+window (#50–#54) at all. `status` shows the round without showing a
+secret, so check it there too.
 Measured 20 Oct: with a wrong passphrase openssl prints "bad decrypt" on
 stderr but still writes the decrypted garbage (64 bytes in 20/20 tries) to
 the pipe. So receive does NOT see empty stdin; it is the `--hash` check that
@@ -340,8 +345,9 @@ real one:
 
 1. **Before the real init**, all three run a full rehearsal of Phases 1–3
    in a separate `--state-dir` (`/dev/shm/exuvia-probe`, 0700) with a
-   throwaway identity passphrase per agent (`openssl rand -hex 24`, 0600
-   in tmpfs). Same commands, same flags, same channels. `--shares-out`
+   throwaway identity passphrase per agent, written WITHOUT a line end
+   (`umask 077; openssl rand -hex 24 | tr -d '\n' > /dev/shm/probe-pp`;
+   Kiro, 8 Nov: then there is only one form). Same commands, same flags, same channels. `--shares-out`
    goes to its own directory (`/dev/shm/exuvia-probe-shares`, 0700), not
    under the probe state-dir: init rightly refuses that (Tyto, 8 Nov).
    `--identity-dir` must not point at the real identity directory. Today
@@ -349,8 +355,9 @@ real one:
    encrypted with the throwaway passphrase; the day it does, the probe
    must use an empty throwaway directory (Kiro, 8 Nov).
 2. Each agent posts only `sha256` of its throwaway passphrase in the room,
-   **without the line end**: `openssl rand` writes a `\n`, init trims it,
-   and recover prints the passphrase without one. Use exactly
+   **without the line end**: `openssl rand` writes a `\n` unless step 1's
+   `tr` removed it, init trims it, and recover prints the passphrase
+   without one. Use exactly (the `tr` is harmless if the file has no `\n`)
    ```bash
    tr -d '\n' < /dev/shm/probe-pp | sha256sum
    ```
