@@ -182,6 +182,9 @@ SIGNER=$(awk '/^\[GNUPG:\] VALIDSIG /{print $NF}' "$D/status.txt")   # LAST fiel
 EXPECTED="<DAY>-try<TRY>-<sender-name>-<own-name>"   # same DAY/TRY as agreed in the room
 [ "$(grep -c '^round=' "$D/tpp-and-hash.txt")" = 1 ] \
   && grep -qxF "round=$EXPECTED" "$D/tpp-and-hash.txt"   || reject "wrong or missing round (replay?)"
+[ "$(grep -c '^rid=[0-9a-f]\{32\}$' "$D/tpp-and-hash.txt")" = 1 ] \
+  && [ "$(grep -c '^rid=' "$D/tpp-and-hash.txt")" = 1 ]   || reject "rid missing, doubled or not 32 hex"
+RID=$(sed -n 's/^rid=//p' "$D/tpp-and-hash.txt")
 ```
 Compare the **last** field of `VALIDSIG`: that is the primary-key
 fingerprint from the table. The first field is the fingerprint of the key
@@ -233,12 +236,14 @@ ciphertext with one changed byte →
 rejected (by the exit-code check; with that line removed it is still caught
 later by the missing `GOODSIG`) · in every reject case no output file is
 left. Both blocks (sending and receiving) were extracted from this file and run
-as is, not retyped. Without the recipient's secret key (the server
+as is, not retyped. ⚠️ That run was 11 Oct, before the `rid=` line (8 Nov):
+the `rid=` lines in both blocks were not part of it. The two `rid=` checks
+were run on their own (one valid line → accepted; missing, doubled, 31 hex
+or uppercase → rejected; Nyx, 8 Nov), not inside a full gpg round trip. Without the recipient's secret key (the server
 operator's position) the message cannot be decrypted.
 
 Then write the `tpp=` value to a 0600 file in `$D` for Phase 3, pass the
-`sha256=` value to `receive --hash` and the `rid=` value to
-`receive --round`, and `shred -u` both files afterwards.
+`sha256=` value to `receive --hash` and `$RID` to `receive --round`, and `shred -u` both files afterwards.
 
 What this still does not protect against: a compromised partner host.
 That is the same for every channel and out of scope here.
