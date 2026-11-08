@@ -1705,10 +1705,6 @@ describe("drop previous — removes only the kept previous, on purpose", () => {
   });
 });
 
-// Rudel 05.11.2026: show-share (helper half of recover) + recover checks every
-// helper share against its hash and round. The version is deliberately not
-// compared (local receive counter, Tyto). N vs N+1 inside one round stays a
-// runbook step; these tests pin down what the tool does and does not catch.
 /** x coordinate of a share: the library stores it in the last byte. */
 function shareX(hex: string): number {
   return parseInt(hex.slice(-2), 16);
@@ -1765,6 +1761,10 @@ describe("rotateAvoidingX (test helper, Kiro 07 Nov)", () => {
   });
 });
 
+// Rudel 05.11.2026: show-share (helper half of recover) + recover checks every
+// helper share against its hash and round. The version is deliberately not
+// compared (local receive counter, Tyto). N vs N+1 inside one round stays a
+// runbook step; these tests pin down what the tool does and does not catch.
 describe("show-share + recover helper checks", () => {
   const SECRET = "ShowShare!2026";
   let nyxDir: string; // the downed agent
