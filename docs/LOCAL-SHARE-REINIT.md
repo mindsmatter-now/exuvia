@@ -92,8 +92,17 @@ was never written to disk. **Store → reload → test → only then init.**
 ```bash
 node dist/cli.js cross-backup init \
   --agent <name> --partners <p1>,<p2> \
-  --passphrase "<backup passphrase>" --local-passphrase-file <file where the passphrase is KEPT>
+  --passphrase "<backup passphrase>" --local-passphrase-file <file where the passphrase is KEPT> \
+  --shares-out <shares-dir>
 ```
+
+`--shares-out` (since #57, 06 Nov) writes each partner share to
+`<shares-dir>/<partner>.share` plus its `.share.sha256`, 0600, and the terminal
+shows only hash and path. `<shares-dir>` must exist with mode 0700, owned by
+you, outside the git worktree and outside `--state-dir`, preferably tmpfs
+(`install -d -m 700 /dev/shm/exuvia-shares`). Without it the shares only live
+in the state file, which is how the state file got used on 13 May. Same rules
+as EXCHANGE-RUNBOOK.md, Phase 1.
 
 Use `--local-passphrase-file`, not `--local-passphrase`. With the file variant
 `init` re-reads that file after writing the state and verifies with what is
@@ -137,7 +146,11 @@ Until Kiro's `send-share` lands this stays manual 🟡.
 ## Step 4 — Receive with hash check
 
 Partners run `cross-backup receive` — wrong hash must be **rejected**, not
-warned about (Kiro F1).
+warned about (Kiro F1). Use the exact command from EXCHANGE-RUNBOOK.md,
+Phase 3: share via `--share-file -` (stdin), hash and **`--round <rid>`** from
+the GPG message. Without `--round` the share is stored as `round none`: the
+round check on recovery is empty, and the share can never be kept as previous
+at the next rotation (Tyto + Kiro, 8 Nov).
 
 ## Step 5 — Verify, then retire the old file
 
