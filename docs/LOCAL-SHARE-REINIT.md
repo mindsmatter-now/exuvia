@@ -92,9 +92,16 @@ was never written to disk. **Store → reload → test → only then init.**
 ```bash
 node dist/cli.js cross-backup init \
   --agent <name> --partners <p1>,<p2> \
-  --passphrase "<backup passphrase>" --local-passphrase-file <file where the passphrase is KEPT> \
+  --identity-dir <path> --passphrase-file <identity-pp-file> \
+  --local-passphrase-file <lpp-file> \
   --shares-out <shares-dir>
 ```
+
+This is the command from EXCHANGE-RUNBOOK.md, Phase 1, word for word. If the
+two ever differ, Phase 1 is right. `<lpp-file>` is the file where the local
+passphrase is KEPT (see below). Never `--passphrase "<…>"`: it puts the
+identity passphrase into the process list (`ps aux`), and the CLI warns about
+exactly that.
 
 `--shares-out` (since #57, 06 Nov) writes each partner share to
 `<shares-dir>/<partner>.share` plus its `.share.sha256`, 0600, and the terminal
