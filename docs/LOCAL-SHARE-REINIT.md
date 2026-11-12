@@ -94,11 +94,20 @@ node dist/cli.js cross-backup init \
   --agent <name> --partners <p1>,<p2> \
   --identity-dir <path> --passphrase-file <identity-pp-file> \
   --local-passphrase-file <lpp-file> \
-  --shares-out <shares-dir>
+  --shares-out <shares-dir> \
+  --force
 ```
 
-This is the command from EXCHANGE-RUNBOOK.md, Phase 1, word for word. If the
-two ever differ, Phase 1 is right. `<lpp-file>` is the file where the local
+This is the command from EXCHANGE-RUNBOOK.md, Phase 1, plus exactly one
+difference, because the situation is different: Phase 1 starts with no state,
+a re-init replaces one. **`--force`** is required here: without it `init`
+refuses (exit 1) as soon as `.exuvia-cross-backup.json` exists, which it
+always does at this point. With `--force`, `init` itself first writes a 0600
+copy `.exuvia-cross-backup.json.bak-<time>` and prints its path. That copy is
+in addition to the Step 0 `.pre-reinit-*` copy, not instead of it (Step 0 is
+made before anything runs, the `.bak-*` at the moment of replacing). Apart from
+`--force`, the two commands must stay identical; `src/docs-sync.test.ts`
+measures that. If they ever differ in anything else, Phase 1 is right. `<lpp-file>` is the file where the local
 passphrase is KEPT (see below). Never `--passphrase "<…>"`: it puts the
 identity passphrase into the process list (`ps aux`), and the CLI warns about
 exactly that.
