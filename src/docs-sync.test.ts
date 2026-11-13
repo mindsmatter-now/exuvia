@@ -127,14 +127,24 @@ test("the comparison itself can turn red (each kind of drift is reported)", () =
     ),
     ["duplicate in copy: --agent", 'value of --agent: "<name>" vs "<x>"'],
   );
+  assert.deepEqual(
+    diffCommands(
+      commandTokens(
+        "node dist/cli.js cross-backup init --agent <name> --shares-out <d> --agent <x>",
+      ),
+      base,
+    ),
+    ["duplicate in source: --agent", 'value of --agent: "<x>" vs "<name>"'],
+  );
 });
 
 /** Body of a top-level `async function name(` in cli.ts, up to the next one. */
 function functionBody(src: string, name: string): string {
   const start = src.indexOf(`\nasync function ${name}(`);
   assert.ok(start >= 0, `function not found: ${name}`);
-  const next = src.indexOf("\nasync function ", start + 1);
-  return src.slice(start, next < 0 ? undefined : next);
+  // Grenze = nächste Funktion auf oberster Ebene, async oder nicht (Kiro, #63)
+  const rest = src.slice(start + 1).search(/\n(async )?function /);
+  return src.slice(start, rest < 0 ? undefined : start + 1 + rest);
 }
 
 test("init really knows --force (the doc does not promise a flag the CLI lacks)", () => {
@@ -142,6 +152,11 @@ test("init really knows --force (the doc does not promise a flag the CLI lacks)"
   // --force read by another command would not make init accept it.
   const cli = readFileSync(join(root, "src", "cli.ts"), "utf8");
   assert.match(functionBody(cli, "crossBackupInitCmd"), /hasFlag\(args, "--force"\)/);
+  assert.doesNotMatch(
+    functionBody(cli, "crossBackupInitCmd").slice(1),
+    /\n(async )?function /,
+    "scope check: the init body must stop at the next top-level function",
+  );
   assert.doesNotMatch(
     functionBody(cli, "crossBackupStatusCmd"),
     /hasFlag\(args, "--force"\)/,
