@@ -29,7 +29,10 @@ function commandTokens(block: string): string[] {
 /** Flags of a command as a map flag → value ("" for bare flags).
  *  A flag given twice is collected in `dupes` instead of silently
  *  overwriting the first value (Tyto, review #62). */
-function flagMap(tokens: string[]): { m: Map<string, string>; dupes: string[] } {
+function flagMap(tokens: string[]): {
+  m: Map<string, string>;
+  dupes: string[];
+} {
   const m = new Map<string, string>();
   const dupes: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
@@ -151,7 +154,10 @@ test("init really knows --force (the doc does not promise a flag the CLI lacks)"
   // Scoped to the init command, not the whole CLI (Kiro, review #62):
   // --force read by another command would not make init accept it.
   const cli = readFileSync(join(root, "src", "cli.ts"), "utf8");
-  assert.match(functionBody(cli, "crossBackupInitCmd"), /hasFlag\(args, "--force"\)/);
+  assert.match(
+    functionBody(cli, "crossBackupInitCmd"),
+    /hasFlag\(args, "--force"\)/,
+  );
   assert.doesNotMatch(
     functionBody(cli, "crossBackupInitCmd").slice(1),
     /\n(async )?function /,
