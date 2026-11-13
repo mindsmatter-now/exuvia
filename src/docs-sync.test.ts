@@ -26,16 +26,23 @@ function commandTokens(block: string): string[] {
   return block.replace(/\\\n/g, " ").split(/\s+/).filter(Boolean);
 }
 
-/** Flags of a command as a map flag → value ("" for bare flags). */
-function flagMap(tokens: string[]): Map<string, string> {
+/** Flags of a command as a map flag → value ("" for bare flags).
+ *  A flag given twice is collected in `dupes` instead of silently
+ *  overwriting the first value (Tyto, review #62). */
+function flagMap(tokens: string[]): {
+  m: Map<string, string>;
+  dupes: string[];
+} {
   const m = new Map<string, string>();
+  const dupes: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
     if (!t.startsWith("--")) continue;
+    if (m.has(t)) dupes.push(t);
     const next = tokens[i + 1];
     m.set(t, next && !next.startsWith("--") ? next : "");
   }
-  return m;
+  return { m, dupes };
 }
 
 /** Differences between source and copy, as readable strings. */
@@ -50,8 +57,12 @@ function diffCommands(source: string[], copy: string[]): string[] {
       .join(" ");
   if (head(source) !== head(copy))
     out.push(`command: "${head(source)}" vs "${head(copy)}"`);
-  const a = flagMap(source),
-    b = flagMap(copy);
+  const fa = flagMap(source),
+    fb = flagMap(copy);
+  for (const k of fa.dupes) out.push(`duplicate in source: ${k}`);
+  for (const k of fb.dupes) out.push(`duplicate in copy: ${k}`);
+  const a = fa.m,
+    b = fb.m;
   for (const [k, v] of a) {
     if (!b.has(k)) out.push(`missing in copy: ${k}`);
     else if (b.get(k) !== v) out.push(`value of ${k}: "${v}" vs "${b.get(k)}"`);
@@ -110,9 +121,51 @@ test("the comparison itself can turn red (each kind of drift is reported)", () =
       'command: "node dist/cli.js cross-backup init" vs "node dist/cli.js cross-backup rotate"',
     ],
   );
+  assert.deepEqual(
+    diffCommands(
+      base,
+      commandTokens(
+        "node dist/cli.js cross-backup init --agent <name> --shares-out <d> --agent <x>",
+      ),
+    ),
+    ["duplicate in copy: --agent", 'value of --agent: "<name>" vs "<x>"'],
+  );
+  assert.deepEqual(
+    diffCommands(
+      commandTokens(
+        "node dist/cli.js cross-backup init --agent <name> --shares-out <d> --agent <x>",
+      ),
+      base,
+    ),
+    ["duplicate in source: --agent", 'value of --agent: "<x>" vs "<name>"'],
+  );
 });
 
+/** Body of a top-level `async function name(` in cli.ts, up to the next one. */
+function functionBody(src: string, name: string): string {
+  const start = src.indexOf(`\nasync function ${name}(`);
+  assert.ok(start >= 0, `function not found: ${name}`);
+  // Grenze = nächste Funktion auf oberster Ebene, async oder nicht (Kiro, #63)
+  const rest = src.slice(start + 1).search(/\n(async )?function /);
+  return src.slice(start, rest < 0 ? undefined : start + 1 + rest);
+}
+
 test("init really knows --force (the doc does not promise a flag the CLI lacks)", () => {
+  // Scoped to the init command, not the whole CLI (Kiro, review #62):
+  // --force read by another command would not make init accept it.
   const cli = readFileSync(join(root, "src", "cli.ts"), "utf8");
-  assert.match(cli, /hasFlag\(args, "--force"\)/);
+  assert.match(
+    functionBody(cli, "crossBackupInitCmd"),
+    /hasFlag\(args, "--force"\)/,
+  );
+  assert.doesNotMatch(
+    functionBody(cli, "crossBackupInitCmd").slice(1),
+    /\n(async )?function /,
+    "scope check: the init body must stop at the next top-level function",
+  );
+  assert.doesNotMatch(
+    functionBody(cli, "crossBackupStatusCmd"),
+    /hasFlag\(args, "--force"\)/,
+    "scope check: a command without --force must not match",
+  );
 });
